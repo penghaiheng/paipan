@@ -29,6 +29,9 @@ document.write("<script src='./js/paipan.gx.js?v="+Math.random()+"'><\/script>")
 <select id="hh" onchange="chg()" style="width:50px;"></select>時
 <select id="mt" onchange="chg()" style="width:50px;"></select>分
 <select id="ss" onchange="chg()" style="width:50px;"></select>秒
+&nbsp;&nbsp;性别:
+<label><input type="radio" name="xb" value="0" onchange="chg()" checked>男</label>
+<label><input type="radio" name="xb" value="1" onchange="chg()">女</label>
 
 <span id="city"></span>
 
@@ -74,7 +77,8 @@ function chg(){
 	var ss = d.getSeconds();
 	var now = p.Jdays(yy, mm, dd, 12, 0, 0); //今天的儒略日
 	
-	var fm = p.fatemaps(0, yy, mm, dd, hh, mt, ss); //不考虑真太阳时
+	var xb = parseInt($('input[name="xb"]:checked').val());
+	var fm = p.fatemaps(xb, yy, mm, dd, hh, mt, ss); //不考虑真太阳时
 	txt += "本机时间:"+yy+"年"+mm+"月"+dd+"日"+hh+"时"+mt+"分"+ss+"秒"+"\n";
 	var y = fm.nl[0].toString().split("");
 	var s = '';
@@ -131,7 +135,7 @@ function chg(){
 	
 	$("#jw").html("东经:"+J+";北纬"+W);
 
-	var fm = p.fatemaps(0, yy, mm, dd, hh, mt, ss, J, W); //此处演示真太阳时排盘
+	var fm = p.fatemaps(xb, yy, mm, dd, hh, mt, ss, J, W); //此处演示真太阳时排盘
 
 	txt += "公历北京时间为:"+yy+"年"+mm+"月"+dd+"日"+hh+"时"+mt+"分"+ss+"秒"+"\n";
 	txt += "本地平太阳时为:"+fm['pty'][0]+"年"+fm['pty'][1]+"月"+fm['pty'][2]+"日"+fm['pty'][3]+"时"+fm['pty'][4]+"分"+fm['pty'][5]+"秒"+"\n";
@@ -155,7 +159,7 @@ function chg(){
 		}
 	}
 
-	txt += "\n该时刻出生的男士起运信息(各门派算法不同,此为其一):\n";
+	txt += "\n该时刻出生的"+(xb===0?'男':'女')+"士起运信息(各门派算法不同,此为其一):\n";
 	txt += fm['qyy_desc'] + "(与十三行八字APP一致)\n";
 	txt += fm['qyy_desc2'] + "\n";
 	txt += "大运:\n";
@@ -163,6 +167,14 @@ function chg(){
 		var a = fm['dy'][x];
 		txt += a['zqage'] + "~" + a['zboz'] + "岁\t[" + a['syear'] + "-" + a['eyear'] + "年]\t" + a['zfma'] + "" + a['zfmb'] + "\t" + a['nzsc'] + "\n";
 		
+	}
+	
+	txt += "\n八字神煞(以年支起算四组神煞,天乙/文昌/羊刃以日干起算,空亡以日柱起算):\n";
+	var ss_lines = getShensha(fm);
+	if(ss_lines.length > 0){
+		txt += ss_lines.join("\n") + "\n";
+	} else {
+		txt += "(本命局四柱中未见以下神煞)\n";
 	}
 	
 	txt += "\n\n";
@@ -234,6 +246,110 @@ function chg(){
 	txt += "\n";
 	
 	$('#text').val(txt);
+}
+
+/**
+ * 计算八字神煞
+ * 常见神煞以年支分四组起算,天乙贵人/文昌贵人/羊刃以日干起算,空亡以日柱起算
+ * @param {object} fm fatemaps 返回结果
+ * @return {string[]} 神煞描述数组
+ */
+function getShensha(fm) {
+	var tg = fm.tg; // [年干,月干,日干,时干]
+	var dz = fm.dz; // [年支,月支,日支,时支]
+	var pillarName = ['年','月','日','时'];
+
+	// 查找目标地支出现在哪些柱
+	function inPillars(target) {
+		var found = [];
+		for (var i = 0; i < 4; i++) {
+			if (dz[i] === target) found.push(pillarName[i]);
+		}
+		return found;
+	}
+
+	// 查找多个目标地支各自出现在哪些柱,返回 {地支字:['年','日',...], ...}
+	function inPillarsAny(targets) {
+		var found = {};
+		for (var i = 0; i < 4; i++) {
+			for (var j = 0; j < targets.length; j++) {
+				if (dz[i] === targets[j]) {
+					var key = p.cdz[targets[j]];
+					if (!found[key]) found[key] = [];
+					found[key].push(pillarName[i]);
+				}
+			}
+		}
+		return found;
+	}
+
+	var lines = [];
+	var dayGan = tg[2];
+
+	// 天乙贵人 (by 日干): 甲戊庚->丑未, 乙己->子申, 丙丁->亥酉, 壬癸->卯巳, 辛->午寅
+	var tygrMap = [[1,7],[0,8],[11,9],[11,9],[1,7],[0,8],[1,7],[6,2],[3,5],[3,5]];
+	var tygrFound = inPillarsAny(tygrMap[dayGan]);
+	var tygrParts = [];
+	for (var k in tygrFound) tygrParts.push(tygrFound[k].join('')+'柱'+k);
+	if (tygrParts.length > 0) lines.push('天乙贵人: ' + tygrParts.join(', '));
+
+	// 文昌贵人 (by 日干): 甲->巳,乙->午,丙->申,丁->酉,戊->申,己->酉,庚->亥,辛->子,壬->寅,癸->卯
+	var wcgrTarget = [5,6,8,9,8,9,11,0,2,3][dayGan];
+	var wcgrFound = inPillars(wcgrTarget);
+	if (wcgrFound.length > 0) lines.push('文昌贵人: ' + wcgrFound.join('')+'柱'+p.cdz[wcgrTarget]);
+
+	// 羊刃 (by 日干): 甲->卯,乙->寅,丙->午,丁->巳,戊->午,己->巳,庚->酉,辛->申,壬->子,癸->亥
+	var yrTarget = [3,2,6,5,6,5,9,8,0,11][dayGan];
+	var yrFound = inPillars(yrTarget);
+	if (yrFound.length > 0) lines.push('羊刃: ' + yrFound.join('')+'柱'+p.cdz[yrTarget]);
+
+	// 以下神煞按年支所在四组起算: 子辰申=0, 丑巳酉=1, 寅午戌=2, 卯未亥=3
+	var g = dz[0] % 4; // 0=申子辰, 1=丑巳酉, 2=寅午戌, 3=卯未亥(含亥)
+
+	// 驿马: 申子辰->寅, 丑巳酉->亥, 寅午戌->申, 卯未亥->巳
+	var yimaTarget = [2,11,8,5][g];
+	var yimaFound = inPillars(yimaTarget);
+	if (yimaFound.length > 0) lines.push('驿马: ' + yimaFound.join('')+'柱'+p.cdz[yimaTarget]);
+
+	// 桃花/咸池: 申子辰->酉, 丑巳酉->午, 寅午戌->卯, 卯未亥->子
+	var thTarget = [9,6,3,0][g];
+	var thFound = inPillars(thTarget);
+	if (thFound.length > 0) lines.push('桃花(咸池): ' + thFound.join('')+'柱'+p.cdz[thTarget]);
+
+	// 将星: 申子辰->子, 丑巳酉->酉, 寅午戌->午, 卯未亥->卯
+	var jxTarget = [0,9,6,3][g];
+	var jxFound = inPillars(jxTarget);
+	if (jxFound.length > 0) lines.push('将星: ' + jxFound.join('')+'柱'+p.cdz[jxTarget]);
+
+	// 华盖: 申子辰->辰, 丑巳酉->丑, 寅午戌->戌, 卯未亥->未
+	var hgTarget = [4,1,10,7][g];
+	var hgFound = inPillars(hgTarget);
+	if (hgFound.length > 0) lines.push('华盖: ' + hgFound.join('')+'柱'+p.cdz[hgTarget]);
+
+	// 劫煞: 申子辰->亥, 丑巳酉->寅, 寅午戌->巳, 卯未亥->申
+	var jsTarget = [11,2,5,8][g];
+	var jsFound = inPillars(jsTarget);
+	if (jsFound.length > 0) lines.push('劫煞: ' + jsFound.join('')+'柱'+p.cdz[jsTarget]);
+
+	// 空亡 (by 日柱六十甲子): 甲子旬->戌亥, 甲戌旬->申酉, 甲申旬->午未,
+	//                          甲午旬->辰巳, 甲辰旬->寅卯, 甲寅旬->子丑
+	var dgz = p.GZ(tg[2], dz[2]);
+	var kwMap = [[10,11],[8,9],[6,7],[4,5],[2,3],[0,1]];
+	var kwTargets = kwMap[Math.floor(dgz / 10)];
+	var kwInPillars = [];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === kwTargets[0] || dz[i] === kwTargets[1]) kwInPillars.push(pillarName[i]);
+	}
+	var kwDesc = '空亡: ' + p.cdz[kwTargets[0]] + p.cdz[kwTargets[1]] + '(日柱'+p.gz[dgz]+'旬空)';
+	if (kwInPillars.length > 0) kwDesc += ' 命中'+kwInPillars.join('')+'柱';
+	lines.push(kwDesc);
+
+	// 魁罡 (日柱为庚辰/庚戌/壬辰/壬戌之一)
+	if ([16,28,46,58].indexOf(dgz) >= 0) {
+		lines.push('魁罡: 日柱为'+p.gz[dgz]);
+	}
+
+	return lines;
 }
 </script>
 <script>
