@@ -2604,6 +2604,213 @@ class paipan{
         return $ifs;
     }
     /**
+     * 神煞明细辅助: 记录命中信息并去重
+     * @param array $items 引用
+     * @param string $name 神煞名称
+     * @param int $targetPillar 命中柱位(0年1月2日3时)
+     * @param int $targetZhi 命中地支代码
+     * @param int $triggerPillar 触发柱位(0年1月2日3时)
+     * @param string $triggerType 触发类型(tg|dz|dgz)
+     * @param int $triggerValue 触发值
+     * @param string $ruleLabel 规则口径描述
+     */
+    private function addShenshaHit(&$items, $name, $targetPillar, $targetZhi, $triggerPillar, $triggerType, $triggerValue, $ruleLabel){
+        if(empty($items[$name])){
+            $items[$name] = [
+                'name' => $name,
+                'hits' => [],
+            ];
+        }
+        $key = $targetPillar . '-' . $targetZhi . '-' . $triggerPillar . '-' . $triggerType . '-' . $triggerValue;
+        if(isset($items[$name]['hits'][$key])){
+            return;
+        }
+        $items[$name]['hits'][$key] = [
+            'target_pillar' => $targetPillar,
+            'target_pillar_name' => ['年', '月', '日', '时'][$targetPillar],
+            'target_zhi' => $targetZhi,
+            'target_zhi_name' => $this->cdz[$targetZhi],
+            'trigger_pillar' => $triggerPillar,
+            'trigger_pillar_name' => ['年', '月', '日', '时'][$triggerPillar],
+            'trigger_type' => $triggerType,
+            'trigger_value' => $triggerValue,
+            'trigger_value_name' => ($triggerType == 'tg') ? $this->ctg[$triggerValue] : (($triggerType == 'dz') ? $this->cdz[$triggerValue] : $this->gz[$triggerValue]),
+            'rule' => $ruleLabel,
+        ];
+    }
+    /**
+     * 八字神煞(四柱分源): 按年/月/日/时各柱分别作为触发来源计算神煞
+     * 说明:
+     * 1) 驿马/桃花/将星/华盖/劫煞按四柱地支分组同查(子辰申/丑巳酉/寅午戌/卯未亥),用于避免只查单柱漏算;
+     * 2) 天乙贵人/文昌贵人/羊刃按日干起算;
+     * 3) 空亡按日柱旬空,魁罡按日柱限定;
+     * @param array $tg 八字天干代码[年,月,日,时]
+     * @param array $dz 八字地支代码[年,月,日,时]
+     * @return array ['items'=>[], 'by_pillar'=>[], 'lines'=>[]]
+     */
+    public function GetShensha($tg, $dz){
+        if(count($tg) < 4 || count($dz) < 4){
+            return ['items' => [], 'by_pillar' => [[], [], [], []], 'lines' => []];
+        }
+        $tg = array_values($tg);
+        $dz = array_values($dz);
+        $pillarNames = ['年', '月', '日', '时'];
+        $nameOrder = ['天乙贵人', '文昌贵人', '羊刃', '驿马', '桃花(咸池)', '将星', '华盖', '劫煞', '空亡', '魁罡'];
+        $items = [];
+        
+        // 日干规则
+        $dayGan = intval($tg[2]);
+        $tygrMap = [[1, 7], [0, 8], [11, 9], [11, 9], [1, 7], [0, 8], [1, 7], [6, 2], [3, 5], [3, 5]]; //天乙贵人
+        foreach ($tygrMap[$dayGan] as $targetZhi){
+            for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
+                if($dz[$targetPillar] == $targetZhi){
+                    $this->addShenshaHit($items, '天乙贵人', $targetPillar, $targetZhi, 2, 'tg', $dayGan, '日干起');
+                }
+            }
+        }
+        $wcgrTarget = [5, 6, 8, 9, 8, 9, 11, 0, 2, 3][$dayGan]; //文昌贵人
+        for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
+            if($dz[$targetPillar] == $wcgrTarget){
+                $this->addShenshaHit($items, '文昌贵人', $targetPillar, $wcgrTarget, 2, 'tg', $dayGan, '日干起');
+            }
+        }
+        $yrTarget = [3, 2, 6, 5, 6, 5, 9, 8, 0, 11][$dayGan]; //羊刃
+        for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
+            if($dz[$targetPillar] == $yrTarget){
+                $this->addShenshaHit($items, '羊刃', $targetPillar, $yrTarget, 2, 'tg', $dayGan, '日干起');
+            }
+        }
+        
+        // 地支分组规则: 四柱同查，避免只按年支导致漏算
+        $groupRules = [
+            ['name' => '驿马', 'map' => [2, 11, 8, 5]],
+            ['name' => '桃花(咸池)', 'map' => [9, 6, 3, 0]],
+            ['name' => '将星', 'map' => [0, 9, 6, 3]],
+            ['name' => '华盖', 'map' => [4, 1, 10, 7]],
+            ['name' => '劫煞', 'map' => [11, 2, 5, 8]],
+        ];
+        foreach($groupRules as $rule){
+            for($triggerPillar = 0; $triggerPillar <= 3; $triggerPillar++){
+                $targetZhi = $rule['map'][$dz[$triggerPillar] % 4];
+                for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
+                    if($dz[$targetPillar] == $targetZhi){
+                        $this->addShenshaHit($items, $rule['name'], $targetPillar, $targetZhi, $triggerPillar, 'dz', $dz[$triggerPillar], $pillarNames[$triggerPillar] . '支起');
+                    }
+                }
+            }
+        }
+        
+        // 空亡与魁罡(日柱)
+        $dgz = $this->GZ($tg[2], $dz[2]);
+        $kwMap = [[10, 11], [8, 9], [6, 7], [4, 5], [2, 3], [0, 1]];
+        $kwTargets = $kwMap[floor($dgz / 10)];
+        for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
+            if($dz[$targetPillar] == $kwTargets[0]){
+                $this->addShenshaHit($items, '空亡', $targetPillar, $kwTargets[0], 2, 'dgz', $dgz, '日柱旬空');
+            }
+            if($dz[$targetPillar] == $kwTargets[1]){
+                $this->addShenshaHit($items, '空亡', $targetPillar, $kwTargets[1], 2, 'dgz', $dgz, '日柱旬空');
+            }
+        }
+        if(empty($items['空亡'])){
+            $items['空亡'] = ['name' => '空亡', 'hits' => []];
+        }
+        $items['空亡']['empty_targets'] = $kwTargets;
+        $items['空亡']['day_gz'] = $dgz;
+        
+        if(in_array($dgz, [16, 28, 46, 58])){
+            $items['魁罡'] = [
+                'name' => '魁罡',
+                'hits' => [
+                    'day' => [
+                        'target_pillar' => 2,
+                        'target_pillar_name' => '日',
+                        'target_zhi' => $dz[2],
+                        'target_zhi_name' => $this->cdz[$dz[2]],
+                        'trigger_pillar' => 2,
+                        'trigger_pillar_name' => '日',
+                        'trigger_type' => 'dgz',
+                        'trigger_value' => $dgz,
+                        'trigger_value_name' => $this->gz[$dgz],
+                        'rule' => '日柱限定',
+                    ]
+                ],
+                'day_gz' => $dgz,
+            ];
+        }
+        
+        // 固定顺序输出
+        $itemsOut = [];
+        foreach($nameOrder as $name){
+            if(!empty($items[$name])){
+                $items[$name]['hits'] = array_values($items[$name]['hits']);
+                $itemsOut[] = $items[$name];
+            }
+        }
+        
+        // 按命中柱位聚合
+        $byPillar = [[], [], [], []];
+        foreach($itemsOut as $item){
+            if(empty($item['hits'])){
+                continue;
+            }
+            foreach($item['hits'] as $hit){
+                $k = $hit['target_pillar'];
+                if(empty($byPillar[$k][$item['name']])){
+                    $byPillar[$k][$item['name']] = [];
+                }
+                $byPillar[$k][$item['name']][] = [
+                    'trigger_pillar' => $hit['trigger_pillar'],
+                    'trigger_pillar_name' => $hit['trigger_pillar_name'],
+                    'trigger_type' => $hit['trigger_type'],
+                    'trigger_value' => $hit['trigger_value'],
+                    'trigger_value_name' => $hit['trigger_value_name'],
+                    'rule' => $hit['rule'],
+                ];
+            }
+        }
+        for($i = 0; $i <= 3; $i++){
+            $byPillar[$i] = array_values(array_map(function($name, $triggers){
+                return ['name' => $name, 'triggers' => $triggers];
+            }, array_keys($byPillar[$i]), $byPillar[$i]));
+        }
+        
+        // 兼容旧展示: 文本行
+        $lines = [];
+        foreach($itemsOut as $item){
+            if($item['name'] == '空亡'){
+                $line = '空亡: ' . $this->cdz[$item['empty_targets'][0]] . $this->cdz[$item['empty_targets'][1]] . '(日柱' . $this->gz[$item['day_gz']] . '旬空)';
+                if(!empty($item['hits'])){
+                    $parts = [];
+                    foreach($item['hits'] as $hit){
+                        $parts[] = $hit['target_pillar_name'] . '柱' . $hit['target_zhi_name'];
+                    }
+                    $line .= ' 命中' . implode('、', $parts);
+                }
+                $lines[] = $line;
+                continue;
+            }
+            if($item['name'] == '魁罡'){
+                $lines[] = '魁罡: 日柱为' . $this->gz[$item['day_gz']];
+                continue;
+            }
+            if(empty($item['hits'])){
+                continue;
+            }
+            $parts = [];
+            foreach($item['hits'] as $hit){
+                $parts[] = $hit['target_pillar_name'] . '柱' . $hit['target_zhi_name'] . '(由' . $hit['trigger_pillar_name'] . (($hit['trigger_type'] == 'tg') ? '干' : (($hit['trigger_type'] == 'dz') ? '支' : '柱')) . $hit['trigger_value_name'] . '触发)';
+            }
+            $lines[] = $item['name'] . ': ' . implode('，', $parts);
+        }
+        
+        return [
+            'items' => $itemsOut,
+            'by_pillar' => $byPillar,
+            'lines' => $lines,
+        ];
+    }
+    /**
      * 根据公历年月日计算命盘信息 fate:命运 map:图示
      * @param int $xb 性别0男1女
      * @param int $yy 年份(-1000-3000).确保传的是$this->J对应的时间
@@ -2839,6 +3046,11 @@ class paipan{
         $rt['xz'] = $this->cxz[$xz]; //星座
         $rt['cyy'] = $this->cyy[$yytg[2]]; //日干阴阳
         
+        $ss = $this->GetShensha($tg, $dz);
+        $rt['shensha'] = $ss['lines']; //兼容旧格式: 直接文本数组
+        $rt['shensha_detail'] = $ss['items']; //新格式: 保留神煞名称、命中柱位、触发依据
+        $rt['shensha_by_pillar'] = $ss['by_pillar']; //按命中柱位聚合
+
         return $rt;
     }
 	/**
