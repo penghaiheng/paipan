@@ -169,7 +169,7 @@ function chg(){
 		
 	}
 	
-	txt += "\n八字神煞(以年支起算四组神煞,天乙/文昌/羊刃以日干起算,空亡以日柱起算):\n";
+	txt += "\n八字神煞(按年/月/日/时四柱分别起算并合并,天乙/文昌/羊刃按日干,空亡按日柱):\n";
 	var ss_lines = getShensha(fm);
 	if(ss_lines.length > 0){
 		txt += ss_lines.join("\n") + "\n";
@@ -249,107 +249,174 @@ function chg(){
 }
 
 /**
- * 计算八字神煞
- * 常见神煞以年支分四组起算,天乙贵人/文昌贵人/羊刃以日干起算,空亡以日柱起算
+ * 计算八字神煞(按年/月/日/时四柱分别作为触发来源)
+ * 常见地支类神煞使用四柱同查，避免只查单柱导致漏算；日干/日柱类按传统规则起算
  * @param {object} fm fatemaps 返回结果
- * @return {string[]} 神煞描述数组
+ * @return {object} {items, byPillar, lines}
  */
-function getShensha(fm) {
+function getShenshaDetail(fm) {
 	var tg = fm.tg; // [年干,月干,日干,时干]
 	var dz = fm.dz; // [年支,月支,日支,时支]
 	var pillarName = ['年','月','日','时'];
+	var order = ['天乙贵人','文昌贵人','羊刃','驿马','桃花(咸池)','将星','华盖','劫煞','空亡','魁罡'];
+	var itemMap = {};
 
-	// 查找目标地支出现在哪些柱
-	function inPillars(target) {
-		var found = [];
-		for (var i = 0; i < 4; i++) {
-			if (dz[i] === target) found.push(pillarName[i]);
-		}
-		return found;
+	function addHit(name, targetPillar, targetZhi, triggerPillar, triggerType, triggerValue, ruleLabel) {
+		if (!itemMap[name]) itemMap[name] = {name:name, hitsMap:{}};
+		var key = [targetPillar, targetZhi, triggerPillar, triggerType, triggerValue].join('-');
+		if (itemMap[name].hitsMap[key]) return;
+		var triggerValueName = triggerType === 'tg' ? p.ctg[triggerValue] : (triggerType === 'dz' ? p.cdz[triggerValue] : p.gz[triggerValue]);
+		itemMap[name].hitsMap[key] = {
+			target_pillar: targetPillar,
+			target_pillar_name: pillarName[targetPillar],
+			target_zhi: targetZhi,
+			target_zhi_name: p.cdz[targetZhi],
+			trigger_pillar: triggerPillar,
+			trigger_pillar_name: pillarName[triggerPillar],
+			trigger_type: triggerType,
+			trigger_value: triggerValue,
+			trigger_value_name: triggerValueName,
+			rule: ruleLabel
+		};
 	}
 
-	// 查找多个目标地支各自出现在哪些柱,返回 {地支字:['年','日',...], ...}
-	function inPillarsAny(targets) {
-		var found = {};
-		for (var i = 0; i < 4; i++) {
-			for (var j = 0; j < targets.length; j++) {
-				if (dz[i] === targets[j]) {
-					var key = p.cdz[targets[j]];
-					if (!found[key]) found[key] = [];
-					found[key].push(pillarName[i]);
+	var dayGan = tg[2];
+	var dayGz = p.GZ(tg[2], dz[2]);
+
+	// 日干规则: 天乙贵人 / 文昌贵人 / 羊刃
+	var tygrMap = [[1,7],[0,8],[11,9],[11,9],[1,7],[0,8],[1,7],[6,2],[3,5],[3,5]];
+	var tygrTargets = tygrMap[dayGan];
+	for (var i = 0; i < 4; i++) {
+		for (var j = 0; j < tygrTargets.length; j++) {
+			if (dz[i] === tygrTargets[j]) addHit('天乙贵人', i, tygrTargets[j], 2, 'tg', dayGan, '日干起');
+		}
+	}
+	var wcgrTarget = [5,6,8,9,8,9,11,0,2,3][dayGan];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === wcgrTarget) addHit('文昌贵人', i, wcgrTarget, 2, 'tg', dayGan, '日干起');
+	}
+	var yrTarget = [3,2,6,5,6,5,9,8,0,11][dayGan];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === yrTarget) addHit('羊刃', i, yrTarget, 2, 'tg', dayGan, '日干起');
+	}
+
+	// 地支分组规则: 年/月/日/时四柱同查
+	var groupRules = [
+		{name:'驿马', map:[2,11,8,5]},
+		{name:'桃花(咸池)', map:[9,6,3,0]},
+		{name:'将星', map:[0,9,6,3]},
+		{name:'华盖', map:[4,1,10,7]},
+		{name:'劫煞', map:[11,2,5,8]}
+	];
+	for (var r = 0; r < groupRules.length; r++) {
+		var rule = groupRules[r];
+		for (var triggerPillar = 0; triggerPillar < 4; triggerPillar++) {
+			var target = rule.map[dz[triggerPillar] % 4];
+			for (var targetPillar = 0; targetPillar < 4; targetPillar++) {
+				if (dz[targetPillar] === target) {
+					addHit(rule.name, targetPillar, target, triggerPillar, 'dz', dz[triggerPillar], pillarName[triggerPillar] + '支起');
 				}
 			}
 		}
-		return found;
+	}
+
+	// 空亡(日柱旬空)
+	var kwMap = [[10,11],[8,9],[6,7],[4,5],[2,3],[0,1]];
+	var kwTargets = kwMap[Math.floor(dayGz / 10)];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === kwTargets[0]) addHit('空亡', i, kwTargets[0], 2, 'dgz', dayGz, '日柱旬空');
+		if (dz[i] === kwTargets[1]) addHit('空亡', i, kwTargets[1], 2, 'dgz', dayGz, '日柱旬空');
+	}
+	if (!itemMap['空亡']) itemMap['空亡'] = {name:'空亡', hitsMap:{}};
+	itemMap['空亡'].emptyTargets = kwTargets;
+	itemMap['空亡'].dayGz = dayGz;
+
+	// 魁罡(日柱限定)
+	if ([16,28,46,58].indexOf(dayGz) >= 0) {
+		itemMap['魁罡'] = {
+			name:'魁罡',
+			hitsMap:{
+				day:{
+					target_pillar:2,
+					target_pillar_name:'日',
+					target_zhi:dz[2],
+					target_zhi_name:p.cdz[dz[2]],
+					trigger_pillar:2,
+					trigger_pillar_name:'日',
+					trigger_type:'dgz',
+					trigger_value:dayGz,
+					trigger_value_name:p.gz[dayGz],
+					rule:'日柱限定'
+				}
+			},
+			dayGz: dayGz
+		};
+	}
+
+	var items = [];
+	for (var o = 0; o < order.length; o++) {
+		var name = order[o];
+		if (!itemMap[name]) continue;
+		itemMap[name].hits = [];
+		for (var hk in itemMap[name].hitsMap) itemMap[name].hits.push(itemMap[name].hitsMap[hk]);
+		items.push(itemMap[name]);
+	}
+
+	var byPillarMap = [{},{},{},{}];
+	for (var ii = 0; ii < items.length; ii++) {
+		var it = items[ii];
+		for (var hi = 0; hi < it.hits.length; hi++) {
+			var hit = it.hits[hi];
+			var pk = hit.target_pillar;
+			if (!byPillarMap[pk][it.name]) byPillarMap[pk][it.name] = [];
+			byPillarMap[pk][it.name].push({
+				trigger_pillar: hit.trigger_pillar,
+				trigger_pillar_name: hit.trigger_pillar_name,
+				trigger_type: hit.trigger_type,
+				trigger_value: hit.trigger_value,
+				trigger_value_name: hit.trigger_value_name,
+				rule: hit.rule
+			});
+		}
+	}
+	var byPillar = [[],[],[],[]];
+	for (var pi = 0; pi < 4; pi++) {
+		for (var sn in byPillarMap[pi]) {
+			byPillar[pi].push({name:sn, triggers:byPillarMap[pi][sn]});
+		}
 	}
 
 	var lines = [];
-	var dayGan = tg[2];
-
-	// 天乙贵人 (by 日干): 甲戊庚->丑未, 乙己->子申, 丙丁->亥酉, 壬癸->卯巳, 辛->午寅
-	var tygrMap = [[1,7],[0,8],[11,9],[11,9],[1,7],[0,8],[1,7],[6,2],[3,5],[3,5]];
-	var tygrFound = inPillarsAny(tygrMap[dayGan]);
-	var tygrParts = [];
-	for (var k in tygrFound) tygrParts.push(tygrFound[k].join('')+'柱'+k);
-	if (tygrParts.length > 0) lines.push('天乙贵人: ' + tygrParts.join(', '));
-
-	// 文昌贵人 (by 日干): 甲->巳,乙->午,丙->申,丁->酉,戊->申,己->酉,庚->亥,辛->子,壬->寅,癸->卯
-	var wcgrTarget = [5,6,8,9,8,9,11,0,2,3][dayGan];
-	var wcgrFound = inPillars(wcgrTarget);
-	if (wcgrFound.length > 0) lines.push('文昌贵人: ' + wcgrFound.join('')+'柱'+p.cdz[wcgrTarget]);
-
-	// 羊刃 (by 日干): 甲->卯,乙->寅,丙->午,丁->巳,戊->午,己->巳,庚->酉,辛->申,壬->子,癸->亥
-	var yrTarget = [3,2,6,5,6,5,9,8,0,11][dayGan];
-	var yrFound = inPillars(yrTarget);
-	if (yrFound.length > 0) lines.push('羊刃: ' + yrFound.join('')+'柱'+p.cdz[yrTarget]);
-
-	// 以下神煞按年支所在四组起算: 子辰申=0, 丑巳酉=1, 寅午戌=2, 卯未亥=3
-	var g = dz[0] % 4; // 0=申子辰, 1=丑巳酉, 2=寅午戌, 3=卯未亥(含亥)
-
-	// 驿马: 申子辰->寅, 丑巳酉->亥, 寅午戌->申, 卯未亥->巳
-	var yimaTarget = [2,11,8,5][g];
-	var yimaFound = inPillars(yimaTarget);
-	if (yimaFound.length > 0) lines.push('驿马: ' + yimaFound.join('')+'柱'+p.cdz[yimaTarget]);
-
-	// 桃花/咸池: 申子辰->酉, 丑巳酉->午, 寅午戌->卯, 卯未亥->子
-	var thTarget = [9,6,3,0][g];
-	var thFound = inPillars(thTarget);
-	if (thFound.length > 0) lines.push('桃花(咸池): ' + thFound.join('')+'柱'+p.cdz[thTarget]);
-
-	// 将星: 申子辰->子, 丑巳酉->酉, 寅午戌->午, 卯未亥->卯
-	var jxTarget = [0,9,6,3][g];
-	var jxFound = inPillars(jxTarget);
-	if (jxFound.length > 0) lines.push('将星: ' + jxFound.join('')+'柱'+p.cdz[jxTarget]);
-
-	// 华盖: 申子辰->辰, 丑巳酉->丑, 寅午戌->戌, 卯未亥->未
-	var hgTarget = [4,1,10,7][g];
-	var hgFound = inPillars(hgTarget);
-	if (hgFound.length > 0) lines.push('华盖: ' + hgFound.join('')+'柱'+p.cdz[hgTarget]);
-
-	// 劫煞: 申子辰->亥, 丑巳酉->寅, 寅午戌->巳, 卯未亥->申
-	var jsTarget = [11,2,5,8][g];
-	var jsFound = inPillars(jsTarget);
-	if (jsFound.length > 0) lines.push('劫煞: ' + jsFound.join('')+'柱'+p.cdz[jsTarget]);
-
-	// 空亡 (by 日柱六十甲子): 甲子旬->戌亥, 甲戌旬->申酉, 甲申旬->午未,
-	//                          甲午旬->辰巳, 甲辰旬->寅卯, 甲寅旬->子丑
-	var dgz = p.GZ(tg[2], dz[2]);
-	var kwMap = [[10,11],[8,9],[6,7],[4,5],[2,3],[0,1]];
-	var kwTargets = kwMap[Math.floor(dgz / 10)];
-	var kwInPillars = [];
-	for (var i = 0; i < 4; i++) {
-		if (dz[i] === kwTargets[0] || dz[i] === kwTargets[1]) kwInPillars.push(pillarName[i]);
-	}
-	var kwDesc = '空亡: ' + p.cdz[kwTargets[0]] + p.cdz[kwTargets[1]] + '(日柱'+p.gz[dgz]+'旬空)';
-	if (kwInPillars.length > 0) kwDesc += ' 命中'+kwInPillars.join('')+'柱';
-	lines.push(kwDesc);
-
-	// 魁罡 (日柱为庚辰/庚戌/壬辰/壬戌之一)
-	if ([16,28,46,58].indexOf(dgz) >= 0) {
-		lines.push('魁罡: 日柱为'+p.gz[dgz]);
+	for (var li = 0; li < items.length; li++) {
+		var item = items[li];
+		if (item.name === '空亡') {
+			var kwDesc = '空亡: ' + p.cdz[item.emptyTargets[0]] + p.cdz[item.emptyTargets[1]] + '(日柱' + p.gz[item.dayGz] + '旬空)';
+			if (item.hits.length > 0) {
+				var kwParts = [];
+				for (var ki = 0; ki < item.hits.length; ki++) kwParts.push(item.hits[ki].target_pillar_name + '柱' + item.hits[ki].target_zhi_name);
+				kwDesc += ' 命中' + kwParts.join('、');
+			}
+			lines.push(kwDesc);
+			continue;
+		}
+		if (item.name === '魁罡') {
+			lines.push('魁罡: 日柱为' + p.gz[item.dayGz]);
+			continue;
+		}
+		if (item.hits.length <= 0) continue;
+		var parts = [];
+		for (var si = 0; si < item.hits.length; si++) {
+			var h = item.hits[si];
+			var st = h.trigger_type === 'tg' ? '干' : (h.trigger_type === 'dz' ? '支' : '柱');
+			parts.push(h.target_pillar_name + '柱' + h.target_zhi_name + '(由' + h.trigger_pillar_name + st + h.trigger_value_name + '触发)');
+		}
+		lines.push(item.name + ': ' + parts.join('，'));
 	}
 
-	return lines;
+	return {items:items, byPillar:byPillar, lines:lines};
+}
+function getShensha(fm) {
+	return getShenshaDetail(fm).lines;
 }
 </script>
 <script>
