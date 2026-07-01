@@ -44,6 +44,30 @@ function trigger_count($ss, $name, $triggerPillar){
     return $n;
 }
 
+function check_pillar_lines($lines){
+    $prefixes = ['年柱：', '月柱：', '日柱：', '时柱：'];
+    if(count($lines) !== 4){
+        return false;
+    }
+    foreach($prefixes as $i => $prefix){
+        if(strpos($lines[$i], $prefix) !== 0){
+            return false;
+        }
+        $body = trim(substr($lines[$i], strlen($prefix)));
+        if($body === ''){
+            return false;
+        }
+        if($body === '无'){
+            continue;
+        }
+        $names = preg_split('/\s+/', $body);
+        if(count($names) !== count(array_unique($names))){
+            return false;
+        }
+    }
+    return true;
+}
+
 $cases = [
     [
         'name' => '年柱触发但日柱不触发(驿马)',
@@ -75,6 +99,17 @@ $cases = [
         'dz' => [0, 5, 0, 2], // 年支子与日支子都应触发驿马寅(时柱寅命中)
         'check' => function($ss){
             return trigger_count($ss, '驿马', 0) > 0 && trigger_count($ss, '驿马', 2) > 0;
+        }
+    ],
+    [
+        'name' => '神煞文本按四柱固定顺序展示并去重',
+        'tg' => [0, 2, 0, 3],
+        'dz' => [0, 5, 0, 2], // 驿马由年/日重复触发, 时柱文本仍应只出现一次驿马
+        'check' => function($ss){
+            if(!check_pillar_lines($ss['lines'])){
+                return false;
+            }
+            return substr_count($ss['lines'][3], '驿马') <= 1;
         }
     ],
 ];

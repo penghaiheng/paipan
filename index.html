@@ -254,6 +254,24 @@ function chg(){
  * @param {object} fm fatemaps 返回结果
  * @return {object} {items, byPillar, lines}
  */
+function formatShenshaByPillarLines(byPillar) {
+	var labels = ['年柱','月柱','日柱','时柱'];
+	var lines = [];
+	for (var i = 0; i < 4; i++) {
+		var names = [];
+		var seen = {};
+		var list = (byPillar && byPillar[i]) ? byPillar[i] : [];
+		for (var j = 0; j < list.length; j++) {
+			var name = list[j] && list[j].name ? list[j].name : '';
+			if (!name || seen[name]) continue;
+			seen[name] = 1;
+			names.push(name);
+		}
+		lines.push(labels[i] + '：' + (names.length > 0 ? names.join(' ') : '无'));
+	}
+	return lines;
+}
+
 function getShenshaDetail(fm) {
 	var tg = fm.tg; // [年干,月干,日干,时干]
 	var dz = fm.dz; // [年支,月支,日支,时支]
@@ -386,36 +404,31 @@ function getShenshaDetail(fm) {
 		}
 	}
 
-	var lines = [];
-	for (var li = 0; li < items.length; li++) {
-		var item = items[li];
-		if (item.name === '空亡') {
-			var kwDesc = '空亡: ' + p.cdz[item.emptyTargets[0]] + p.cdz[item.emptyTargets[1]] + '(日柱' + p.gz[item.dayGz] + '旬空)';
-			if (item.hits.length > 0) {
-				var kwParts = [];
-				for (var ki = 0; ki < item.hits.length; ki++) kwParts.push(item.hits[ki].target_pillar_name + '柱' + item.hits[ki].target_zhi_name);
-				kwDesc += ' 命中' + kwParts.join('、');
-			}
-			lines.push(kwDesc);
-			continue;
-		}
-		if (item.name === '魁罡') {
-			lines.push('魁罡: 日柱为' + p.gz[item.dayGz]);
-			continue;
-		}
-		if (item.hits.length <= 0) continue;
-		var parts = [];
-		for (var si = 0; si < item.hits.length; si++) {
-			var h = item.hits[si];
-			var st = h.trigger_type === 'tg' ? '干' : (h.trigger_type === 'dz' ? '支' : '柱');
-			parts.push(h.target_pillar_name + '柱' + h.target_zhi_name + '(由' + h.trigger_pillar_name + st + h.trigger_value_name + '触发)');
-		}
-		lines.push(item.name + ': ' + parts.join('，'));
-	}
+	var lines = formatShenshaByPillarLines(byPillar);
 
 	return {items:items, byPillar:byPillar, lines:lines};
 }
 function getShensha(fm) {
+	if (fm && fm.shensha_by_pillar && fm.shensha_by_pillar.length === 4) {
+		return formatShenshaByPillarLines(fm.shensha_by_pillar);
+	}
+	if (fm && fm.shensha_detail && fm.shensha_detail.length) {
+		var byPillar = [[],[],[],[]];
+		var byPillarNameMap = [{},{},{},{}];
+		for (var i = 0; i < fm.shensha_detail.length; i++) {
+			var item = fm.shensha_detail[i];
+			if (!item || !item.hits) continue;
+			for (var j = 0; j < item.hits.length; j++) {
+				var hit = item.hits[j];
+				var pIdx = hit.target_pillar;
+				if (pIdx < 0 || pIdx > 3) continue;
+				if (byPillarNameMap[pIdx][item.name]) continue;
+				byPillarNameMap[pIdx][item.name] = 1;
+				byPillar[pIdx].push({name:item.name});
+			}
+		}
+		return formatShenshaByPillarLines(byPillar);
+	}
 	return getShenshaDetail(fm).lines;
 }
 </script>
