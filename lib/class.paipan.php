@@ -2775,33 +2775,23 @@ class paipan{
             }, array_keys($byPillar[$i]), $byPillar[$i]));
         }
         
-        // 兼容旧展示: 文本行
+        // 兼容旧展示: 文本行(按四柱固定顺序分组)
         $lines = [];
-        foreach($itemsOut as $item){
-            if($item['name'] == '空亡'){
-                $line = '空亡: ' . $this->cdz[$item['empty_targets'][0]] . $this->cdz[$item['empty_targets'][1]] . '(日柱' . $this->gz[$item['day_gz']] . '旬空)';
-                if(!empty($item['hits'])){
-                    $parts = [];
-                    foreach($item['hits'] as $hit){
-                        $parts[] = $hit['target_pillar_name'] . '柱' . $hit['target_zhi_name'];
+        $pillarLineNames = ['年柱', '月柱', '日柱', '时柱'];
+        for($i = 0; $i <= 3; $i++){
+            $names = [];
+            if(!empty($byPillar[$i])){
+                foreach($byPillar[$i] as $ss){
+                    if(empty($ss['name'])){
+                        continue;
                     }
-                    $line .= ' 命中' . implode('、', $parts);
+                    if(in_array($ss['name'], $names, true)){
+                        continue;
+                    }
+                    $names[] = $ss['name'];
                 }
-                $lines[] = $line;
-                continue;
             }
-            if($item['name'] == '魁罡'){
-                $lines[] = '魁罡: 日柱为' . $this->gz[$item['day_gz']];
-                continue;
-            }
-            if(empty($item['hits'])){
-                continue;
-            }
-            $parts = [];
-            foreach($item['hits'] as $hit){
-                $parts[] = $hit['target_pillar_name'] . '柱' . $hit['target_zhi_name'] . '(由' . $hit['trigger_pillar_name'] . (($hit['trigger_type'] == 'tg') ? '干' : (($hit['trigger_type'] == 'dz') ? '支' : '柱')) . $hit['trigger_value_name'] . '触发)';
-            }
-            $lines[] = $item['name'] . ': ' . implode('，', $parts);
+            $lines[] = $pillarLineNames[$i] . '：' . (empty($names) ? '无' : implode(' ', $names));
         }
         
         return [
