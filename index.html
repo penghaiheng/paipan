@@ -332,8 +332,9 @@ function getShenshaDetail(fm) {
 	// ================================================================
 
 	// 天乙贵人: 甲戊庚→丑未, 乙己→子申, 丙丁→亥酉, 辛→午寅, 壬癸→卯巳
+	// 日干起类神煞跳过年支(年柱),只查月/日/时三柱
 	var tygrMap = [[1,7],[0,8],[11,9],[11,9],[1,7],[0,8],[1,7],[6,2],[3,5],[3,5]];
-	for (var i = 0; i < 4; i++) {
+	for (var i = 1; i < 4; i++) {
 		for (var j = 0; j < tygrMap[dayGan].length; j++) {
 			if (dz[i] === tygrMap[dayGan][j]) addHit('天乙贵人', i, tygrMap[dayGan][j], 2, 'tg', dayGan, '日干起');
 		}
@@ -341,25 +342,25 @@ function getShenshaDetail(fm) {
 
 	// 文昌贵人: 甲→巳,乙→午,丙戊→申,丁己→酉,庚→亥,辛→子,壬→寅,癸→卯
 	var wcgrTarget = [5,6,8,9,8,9,11,0,2,3][dayGan];
-	for (var i = 0; i < 4; i++) {
+	for (var i = 1; i < 4; i++) {
 		if (dz[i] === wcgrTarget) addHit('文昌贵人', i, wcgrTarget, 2, 'tg', dayGan, '日干起');
 	}
 
 	// 羊刃: 甲→卯,乙→寅,丙戊→午,丁己→巳,庚→酉,辛→申,壬→子,癸→亥
 	var yrTarget = [3,2,6,5,6,5,9,8,0,11][dayGan];
-	for (var i = 0; i < 4; i++) {
+	for (var i = 1; i < 4; i++) {
 		if (dz[i] === yrTarget) addHit('羊刃', i, yrTarget, 2, 'tg', dayGan, '日干起');
 	}
 
 	// 禄神(建禄): 甲→寅,乙→卯,丙→巳,丁→午,戊→巳,己→午,庚→申,辛→酉,壬→亥,癸→子
 	var luTarget = [2,3,5,6,5,6,8,9,11,0][dayGan];
-	for (var i = 0; i < 4; i++) {
+	for (var i = 1; i < 4; i++) {
 		if (dz[i] === luTarget) addHit('禄神', i, luTarget, 2, 'tg', dayGan, '日干起');
 	}
 
 	// 太极贵人: 甲乙→子午, 丙丁→卯酉, 戊己→子午卯酉, 庚辛→寅亥, 壬癸→辰巳丑未
 	var tjgrMap = [[0,6],[0,6],[3,9],[3,9],[0,6,3,9],[0,6,3,9],[2,11],[2,11],[4,5,1,7],[4,5,1,7]];
-	for (var i = 0; i < 4; i++) {
+	for (var i = 1; i < 4; i++) {
 		for (var j = 0; j < tjgrMap[dayGan].length; j++) {
 			if (dz[i] === tjgrMap[dayGan][j]) addHit('太极贵人', i, tjgrMap[dayGan][j], 2, 'tg', dayGan, '日干起');
 		}
@@ -367,7 +368,7 @@ function getShenshaDetail(fm) {
 
 	// 金舆: 甲→辰,乙→巳,丙→未,丁→申,戊→未,己→申,庚→戌,辛→亥,壬→丑,癸→寅
 	var jyTarget = [4,5,7,8,7,8,10,11,1,2][dayGan];
-	for (var i = 0; i < 4; i++) {
+	for (var i = 1; i < 4; i++) {
 		if (dz[i] === jyTarget) addHit('金舆', i, jyTarget, 2, 'tg', dayGan, '日干起');
 	}
 
@@ -468,7 +469,7 @@ function getShenshaDetail(fm) {
 	}
 
 	// ================================================================
-	// 五、三合组地支规则(年/月/日/时四支均作触发来源)
+	// 五、三合组地支规则(仅年支/日支作触发来源,避免月支/时支随意触发致年柱误算)
 	// ================================================================
 	// 三合组分组(显式映射): 子辰申=0, 丑巳酉=1, 寅午戌=2, 卯未亥=3
 	var dzGroup = [0,1,2,3,0,1,2,3,0,1,2,3];
@@ -481,9 +482,12 @@ function getShenshaDetail(fm) {
 		{name:'亡神',       map:[5,8,11,2]},   // 子辰申→巳, 丑巳酉→申, 寅午戌→亥, 卯未亥→寅
 		{name:'灾煞',       map:[6,3,0,9]}     // 子辰申→午, 丑巳酉→卯, 寅午戌→子, 卯未亥→酉
 	];
+	// 只用年支(0)和日支(2)作为触发来源,月支/时支不触发
+	var triggerPillars = [0, 2];
 	for (var r = 0; r < groupRules.length; r++) {
 		var rule = groupRules[r];
-		for (var triggerPillar = 0; triggerPillar < 4; triggerPillar++) {
+		for (var ti = 0; ti < triggerPillars.length; ti++) {
+			var triggerPillar = triggerPillars[ti];
 			var group = dzGroup[dz[triggerPillar]];
 			var target = rule.map[group];
 			for (var targetPillar = 0; targetPillar < 4; targetPillar++) {
@@ -499,11 +503,9 @@ function getShenshaDetail(fm) {
 	// ================================================================
 	var dayZhi = dz[2];
 
-	// 元辰(日支起): 目标=日支+7
+	// 元辰(日支起): 目标=日支+7, 仅查时支,不落年月日柱
 	var ycTarget = (dayZhi + 7) % 12;
-	for (var i = 0; i < 4; i++) {
-		if (dz[i] === ycTarget) addHit('元辰', i, ycTarget, 2, 'dz', dayZhi, '日支起');
-	}
+	if (dz[3] === ycTarget) addHit('元辰', 3, ycTarget, 2, 'dz', dayZhi, '日支起');
 
 	// ================================================================
 	// 七、地支自身判断
