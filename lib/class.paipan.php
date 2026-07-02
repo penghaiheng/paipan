@@ -2604,7 +2604,7 @@ class paipan{
         return $ifs;
     }
     /**
-     * 神煞明细辅助: 记录命中信息并去重
+     * 神煞明细辅助: 记录命中信息并去重(命中目标为地支)
      * @param array $items 引用
      * @param string $name 神煞名称
      * @param int $targetPillar 命中柱位(0年1月2日3时)
@@ -2639,11 +2639,53 @@ class paipan{
         ];
     }
     /**
+     * 神煞明细辅助: 记录命中信息并去重(命中目标为天干)
+     * 用于天德贵人/月德贵人/天德合/月德合等以天干为目标的神煞
+     * @param array $items 引用
+     * @param string $name 神煞名称
+     * @param int $targetPillar 命中柱位(0年1月2日3时)
+     * @param int $targetTg 命中天干代码(0甲..9癸)
+     * @param int $triggerPillar 触发柱位(0年1月2日3时)
+     * @param string $triggerType 触发类型(tg|dz|dgz)
+     * @param int $triggerValue 触发值
+     * @param string $ruleLabel 规则口径描述
+     */
+    private function addShenshaHitTg(&$items, $name, $targetPillar, $targetTg, $triggerPillar, $triggerType, $triggerValue, $ruleLabel){
+        if(empty($items[$name])){
+            $items[$name] = ['name' => $name, 'hits' => []];
+        }
+        $key = $targetPillar . '-tg' . $targetTg . '-' . $triggerPillar . '-' . $triggerType . '-' . $triggerValue;
+        if(isset($items[$name]['hits'][$key])){
+            return;
+        }
+        $triggerValueName = ($triggerType == 'tg') ? $this->ctg[$triggerValue] : (($triggerType == 'dz') ? $this->cdz[$triggerValue] : $this->gz[$triggerValue]);
+        $items[$name]['hits'][$key] = [
+            'target_pillar' => $targetPillar,
+            'target_pillar_name' => ['年', '月', '日', '时'][$targetPillar],
+            'target_tg' => $targetTg,
+            'target_tg_name' => $this->ctg[$targetTg],
+            'trigger_pillar' => $triggerPillar,
+            'trigger_pillar_name' => ['年', '月', '日', '时'][$triggerPillar],
+            'trigger_type' => $triggerType,
+            'trigger_value' => $triggerValue,
+            'trigger_value_name' => $triggerValueName,
+            'rule' => $ruleLabel,
+        ];
+    }
+    /**
      * 八字神煞(四柱分源): 按年/月/日/时各柱分别作为触发来源计算神煞
-     * 说明:
-     * 1) 驿马/桃花/将星/华盖/劫煞按四柱地支分组同查(子辰申/丑巳酉/寅午戌/卯未亥),用于避免只查单柱漏算;
-     * 2) 天乙贵人/文昌贵人/羊刃按日干起算;
-     * 3) 空亡按日柱旬空,魁罡按日柱限定;
+     * 规则来源说明:
+     * - 日干起: 天乙贵人/文昌贵人/羊刃/禄神/太极贵人/金舆(按日干查四柱地支)
+     * - 年干起: 福星贵人(按年干查四柱地支)
+     * - 月支起: 天德贵人/月德贵人/天德合/月德合/天医(月支查天干或地支)
+     *   - 天德贵人部分月份目标为天干,部分为地支(传统口径)
+     *   - 月德贵人/月德合目标均为天干
+     * - 年支起: 红鸾/天喜/孤辰/寡宿(年支查四柱地支)
+     * - 三合组(年/月/日/时地支均作触发): 驿马/桃花/将星/华盖/劫煞/亡神/灾煞
+     *   - 三合组分组: 子辰申=0, 丑巳酉=1, 寅午戌=2, 卯未亥=3
+     * - 日支起: 元辰(日支+7查四柱地支)
+     * - 地支自身: 天罗(戌亥)/地网(辰巳)
+     * - 日柱特殊: 空亡(旬空)/魁罡(指定日柱60甲子)
      * @param array $tg 八字天干代码[年,月,日,时]
      * @param array $dz 八字地支代码[年,月,日,时]
      * @return array ['items'=>[], 'by_pillar'=>[], 'lines'=>[]]
@@ -2655,43 +2697,187 @@ class paipan{
         $tg = array_values($tg);
         $dz = array_values($dz);
         $pillarNames = ['年', '月', '日', '时'];
-        $nameOrder = ['天乙贵人', '文昌贵人', '羊刃', '驿马', '桃花(咸池)', '将星', '华盖', '劫煞', '空亡', '魁罡'];
+        // 神煞显示顺序(吉神在前,凶煞在后)
+        $nameOrder = [
+            '天乙贵人', '文昌贵人', '福星贵人', '太极贵人', '天德贵人', '月德贵人', '天德合', '月德合',
+            '禄神', '金舆', '羊刃', '驿马', '桃花(咸池)', '将星', '华盖', '劫煞', '亡神', '灾煞',
+            '红鸾', '天喜', '孤辰', '寡宿', '天医', '元辰', '空亡', '魁罡', '天罗', '地网',
+        ];
         $items = [];
         
-        // 日干规则
+        // ================================================================
+        // 一、日干起算
+        // ================================================================
         $dayGan = intval($tg[2]);
-        $tygrMap = [[1, 7], [0, 8], [11, 9], [11, 9], [1, 7], [0, 8], [1, 7], [6, 2], [3, 5], [3, 5]]; //天乙贵人
-        foreach ($tygrMap[$dayGan] as $targetZhi){
-            for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
-                if($dz[$targetPillar] == $targetZhi){
-                    $this->addShenshaHit($items, '天乙贵人', $targetPillar, $targetZhi, 2, 'tg', $dayGan, '日干起');
-                }
-            }
-        }
-        $wcgrTarget = [5, 6, 8, 9, 8, 9, 11, 0, 2, 3][$dayGan]; //文昌贵人
-        for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
-            if($dz[$targetPillar] == $wcgrTarget){
-                $this->addShenshaHit($items, '文昌贵人', $targetPillar, $wcgrTarget, 2, 'tg', $dayGan, '日干起');
-            }
-        }
-        $yrTarget = [3, 2, 6, 5, 6, 5, 9, 8, 0, 11][$dayGan]; //羊刃
-        for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
-            if($dz[$targetPillar] == $yrTarget){
-                $this->addShenshaHit($items, '羊刃', $targetPillar, $yrTarget, 2, 'tg', $dayGan, '日干起');
+        
+        // 天乙贵人: 甲戊庚→丑(1)未(7), 乙己→子(0)申(8), 丙丁→亥(11)酉(9), 辛→午(6)寅(2), 壬癸→卯(3)巳(5)
+        $tygrMap = [[1,7],[0,8],[11,9],[11,9],[1,7],[0,8],[1,7],[6,2],[3,5],[3,5]];
+        foreach($tygrMap[$dayGan] as $tz){
+            for($tp = 0; $tp <= 3; $tp++){
+                if($dz[$tp] == $tz) $this->addShenshaHit($items,'天乙贵人',$tp,$tz,2,'tg',$dayGan,'日干起');
             }
         }
         
-        // 地支分组规则: 四柱同查，避免只按年支导致漏算
+        // 文昌贵人: 甲→巳(5),乙→午(6),丙戊→申(8),丁己→酉(9),庚→亥(11),辛→子(0),壬→寅(2),癸→卯(3)
+        $wcgrTarget = [5,6,8,9,8,9,11,0,2,3][$dayGan];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $wcgrTarget) $this->addShenshaHit($items,'文昌贵人',$tp,$wcgrTarget,2,'tg',$dayGan,'日干起');
+        }
+        
+        // 羊刃(劫刃): 甲→卯(3),乙→寅(2),丙戊→午(6),丁己→巳(5),庚→酉(9),辛→申(8),壬→子(0),癸→亥(11)
+        $yrTarget = [3,2,6,5,6,5,9,8,0,11][$dayGan];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $yrTarget) $this->addShenshaHit($items,'羊刃',$tp,$yrTarget,2,'tg',$dayGan,'日干起');
+        }
+        
+        // 禄神(建禄/临官): 甲→寅(2),乙→卯(3),丙→巳(5),丁→午(6),戊→巳(5),己→午(6),庚→申(8),辛→酉(9),壬→亥(11),癸→子(0)
+        $luTarget = [2,3,5,6,5,6,8,9,11,0][$dayGan];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $luTarget) $this->addShenshaHit($items,'禄神',$tp,$luTarget,2,'tg',$dayGan,'日干起');
+        }
+        
+        // 太极贵人: 甲乙→子(0)午(6), 丙丁→卯(3)酉(9), 戊己→子(0)午(6)卯(3)酉(9), 庚辛→寅(2)亥(11), 壬癸→辰(4)巳(5)丑(1)未(7)
+        $tjgrMap = [[0,6],[0,6],[3,9],[3,9],[0,6,3,9],[0,6,3,9],[2,11],[2,11],[4,5,1,7],[4,5,1,7]];
+        foreach($tjgrMap[$dayGan] as $tz){
+            for($tp = 0; $tp <= 3; $tp++){
+                if($dz[$tp] == $tz) $this->addShenshaHit($items,'太极贵人',$tp,$tz,2,'tg',$dayGan,'日干起');
+            }
+        }
+        
+        // 金舆: 甲→辰(4),乙→巳(5),丙→未(7),丁→申(8),戊→未(7),己→申(8),庚→戌(10),辛→亥(11),壬→丑(1),癸→寅(2)
+        $jyTarget = [4,5,7,8,7,8,10,11,1,2][$dayGan];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $jyTarget) $this->addShenshaHit($items,'金舆',$tp,$jyTarget,2,'tg',$dayGan,'日干起');
+        }
+        
+        // ================================================================
+        // 二、年干起算
+        // ================================================================
+        $yearGan = intval($tg[0]);
+        
+        // 福星贵人(年干起): 甲→寅(2),乙→丑(1),丙→子(0),丁→亥(11),戊→午(6),己→巳(5),庚→申(8),辛→未(7),壬→戌(10),癸→酉(9)
+        $fxgrTarget = [2,1,0,11,6,5,8,7,10,9][$yearGan];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $fxgrTarget) $this->addShenshaHit($items,'福星贵人',$tp,$fxgrTarget,0,'tg',$yearGan,'年干起');
+        }
+        
+        // ================================================================
+        // 三、月支起算
+        // ================================================================
+        $monthZhi = intval($dz[1]);
+        
+        // 天德贵人(月支起): 部分月份目标为天干,部分为地支
+        // 子→巳(dz5),丑→庚(tg6),寅→丁(tg3),卯→申(dz8),辰→壬(tg8),巳→辛(tg7),
+        // 午→亥(dz11),未→甲(tg0),申→癸(tg9),酉→寅(dz2),戌→丙(tg2),亥→乙(tg1)
+        $tdgrRules = [
+            [5,'dz'],[6,'tg'],[3,'tg'],[8,'dz'],[8,'tg'],[7,'tg'],
+            [11,'dz'],[0,'tg'],[9,'tg'],[2,'dz'],[2,'tg'],[1,'tg'],
+        ];
+        [$tdgrVal, $tdgrType] = $tdgrRules[$monthZhi];
+        if($tdgrType == 'tg'){
+            for($tp = 0; $tp <= 3; $tp++){
+                if($tg[$tp] == $tdgrVal) $this->addShenshaHitTg($items,'天德贵人',$tp,$tdgrVal,1,'dz',$monthZhi,'月支起');
+            }
+        } else {
+            for($tp = 0; $tp <= 3; $tp++){
+                if($dz[$tp] == $tdgrVal) $this->addShenshaHit($items,'天德贵人',$tp,$tdgrVal,1,'dz',$monthZhi,'月支起');
+            }
+        }
+        
+        // 月德贵人(月支起,目标均为天干): 寅午戌→丙(2),申子辰→壬(8),巳酉丑→庚(6),亥卯未→甲(0)
+        $ydgrTgMap = [8,6,2,0,8,6,2,0,8,6,2,0];
+        $ydgrTg = $ydgrTgMap[$monthZhi];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($tg[$tp] == $ydgrTg) $this->addShenshaHitTg($items,'月德贵人',$tp,$ydgrTg,1,'dz',$monthZhi,'月支起');
+        }
+        
+        // 天德合(月支起,天德贵人之六合): 子→申(dz8),丑→乙(tg1),寅→壬(tg8),卯→巳(dz5),辰→丁(tg3),巳→丙(tg2),
+        //   午→寅(dz2),未→己(tg4),申→戊(tg4),酉→亥(dz11),戌→辛(tg7),亥→庚(tg6)
+        $tdhrRules = [
+            [8,'dz'],[1,'tg'],[8,'tg'],[5,'dz'],[3,'tg'],[2,'tg'],
+            [2,'dz'],[4,'tg'],[4,'tg'],[11,'dz'],[7,'tg'],[6,'tg'],
+        ];
+        [$tdhrVal, $tdhrType] = $tdhrRules[$monthZhi];
+        if($tdhrType == 'tg'){
+            for($tp = 0; $tp <= 3; $tp++){
+                if($tg[$tp] == $tdhrVal) $this->addShenshaHitTg($items,'天德合',$tp,$tdhrVal,1,'dz',$monthZhi,'月支起');
+            }
+        } else {
+            for($tp = 0; $tp <= 3; $tp++){
+                if($dz[$tp] == $tdhrVal) $this->addShenshaHit($items,'天德合',$tp,$tdhrVal,1,'dz',$monthZhi,'月支起');
+            }
+        }
+        
+        // 月德合(月支起,月德之六合,目标均为天干): 申子辰→丁(3),巳酉丑→乙(1),寅午戌→辛(7),亥卯未→己(4)
+        $ydhrTgMap = [3,1,7,4,3,1,7,4,3,1,7,4];
+        $ydhrTg = $ydhrTgMap[$monthZhi];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($tg[$tp] == $ydhrTg) $this->addShenshaHitTg($items,'月德合',$tp,$ydhrTg,1,'dz',$monthZhi,'月支起');
+        }
+        
+        // 天医(月支起): 目标=月支前一位地支
+        $tyiTarget = ($monthZhi - 1 + 12) % 12;
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $tyiTarget) $this->addShenshaHit($items,'天医',$tp,$tyiTarget,1,'dz',$monthZhi,'月支起');
+        }
+        
+        // ================================================================
+        // 四、年支起算
+        // ================================================================
+        $yearZhi = intval($dz[0]);
+        
+        // 红鸾(年支起): 子→卯(3),依次递减 target=(3-yearZhi+12)%12
+        $hlTarget = (3 - $yearZhi + 12) % 12;
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $hlTarget) $this->addShenshaHit($items,'红鸾',$tp,$hlTarget,0,'dz',$yearZhi,'年支起');
+        }
+        
+        // 天喜(年支起): 红鸾对宫+6, 子→酉(9) target=(9-yearZhi+12)%12
+        $txTarget = (9 - $yearZhi + 12) % 12;
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $txTarget) $this->addShenshaHit($items,'天喜',$tp,$txTarget,0,'dz',$yearZhi,'年支起');
+        }
+        
+        // 孤辰(年支起): 寅卯辰→巳(5),巳午未→申(8),申酉戌→亥(11),亥子丑→寅(2)
+        // 按年支(0-11)的四季分组: 子丑(亥)→寅(2), 寅卯辰→巳(5), 巳午未→申(8), 申酉戌→亥(11)
+        $gcMap = [2,2,5,5,5,8,8,8,11,11,11,2];
+        $gcTarget = $gcMap[$yearZhi];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $gcTarget) $this->addShenshaHit($items,'孤辰',$tp,$gcTarget,0,'dz',$yearZhi,'年支起');
+        }
+        
+        // 寡宿(年支起): 寅卯辰→丑(1),巳午未→辰(4),申酉戌→未(7),亥子丑→戌(10)
+        $gsMap = [10,10,1,1,1,4,4,4,7,7,7,10];
+        $gsTarget = $gsMap[$yearZhi];
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $gsTarget) $this->addShenshaHit($items,'寡宿',$tp,$gsTarget,0,'dz',$yearZhi,'年支起');
+        }
+        
+        // ================================================================
+        // 五、三合组地支规则(年/月/日/时四支均作触发来源)
+        // ================================================================
+        // 三合组分组(显式映射): 子辰申=0, 丑巳酉=1, 寅午戌=2, 卯未亥=3
+        $dzGroup = [0,1,2,3,0,1,2,3,0,1,2,3];
         $groupRules = [
-            ['name' => '驿马', 'map' => [2, 11, 8, 5]],
-            ['name' => '桃花(咸池)', 'map' => [9, 6, 3, 0]],
-            ['name' => '将星', 'map' => [0, 9, 6, 3]],
-            ['name' => '华盖', 'map' => [4, 1, 10, 7]],
-            ['name' => '劫煞', 'map' => [11, 2, 5, 8]],
+            // 驿马: 子辰申→寅(2), 丑巳酉→亥(11), 寅午戌→申(8), 卯未亥→巳(5)
+            ['name'=>'驿马',       'map'=>[2,11,8,5]],
+            // 桃花(咸池): 子辰申→酉(9), 丑巳酉→午(6), 寅午戌→卯(3), 卯未亥→子(0)
+            ['name'=>'桃花(咸池)','map'=>[9,6,3,0]],
+            // 将星: 子辰申→子(0), 丑巳酉→酉(9), 寅午戌→午(6), 卯未亥→卯(3)
+            ['name'=>'将星',       'map'=>[0,9,6,3]],
+            // 华盖: 子辰申→辰(4), 丑巳酉→丑(1), 寅午戌→戌(10), 卯未亥→未(7)
+            ['name'=>'华盖',       'map'=>[4,1,10,7]],
+            // 劫煞: 子辰申→亥(11), 丑巳酉→寅(2), 寅午戌→巳(5), 卯未亥→申(8)
+            ['name'=>'劫煞',       'map'=>[11,2,5,8]],
+            // 亡神: 子辰申→巳(5), 丑巳酉→申(8), 寅午戌→亥(11), 卯未亥→寅(2)
+            ['name'=>'亡神',       'map'=>[5,8,11,2]],
+            // 灾煞: 子辰申→午(6), 丑巳酉→卯(3), 寅午戌→子(0), 卯未亥→酉(9)
+            ['name'=>'灾煞',       'map'=>[6,3,0,9]],
         ];
         foreach($groupRules as $rule){
             for($triggerPillar = 0; $triggerPillar <= 3; $triggerPillar++){
-                $targetZhi = $rule['map'][$dz[$triggerPillar] % 4];
+                $group = $dzGroup[$dz[$triggerPillar]];
+                $targetZhi = $rule['map'][$group];
                 for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
                     if($dz[$targetPillar] == $targetZhi){
                         $this->addShenshaHit($items, $rule['name'], $targetPillar, $targetZhi, $triggerPillar, 'dz', $dz[$triggerPillar], $pillarNames[$triggerPillar] . '支起');
@@ -2700,16 +2886,45 @@ class paipan{
             }
         }
         
-        // 空亡与魁罡(日柱)
+        // ================================================================
+        // 六、日支起算
+        // ================================================================
+        $dayZhi = intval($dz[2]);
+        
+        // 元辰(日支起): 目标=日支+7, 子→未(7),丑→申(8),...
+        $ycTarget = ($dayZhi + 7) % 12;
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == $ycTarget) $this->addShenshaHit($items,'元辰',$tp,$ycTarget,2,'dz',$dayZhi,'日支起');
+        }
+        
+        // ================================================================
+        // 七、地支自身判断
+        // ================================================================
+        // 天罗: 四柱见戌(10)或亥(11)者
+        // 地网: 四柱见辰(4)或巳(5)者
+        for($tp = 0; $tp <= 3; $tp++){
+            if($dz[$tp] == 10 || $dz[$tp] == 11){
+                $this->addShenshaHit($items,'天罗',$tp,$dz[$tp],$tp,'dz',$dz[$tp],'地支自身');
+            }
+            if($dz[$tp] == 4 || $dz[$tp] == 5){
+                $this->addShenshaHit($items,'地网',$tp,$dz[$tp],$tp,'dz',$dz[$tp],'地支自身');
+            }
+        }
+        
+        // ================================================================
+        // 八、日柱特殊
+        // ================================================================
         $dgz = $this->GZ($tg[2], $dz[2]);
-        $kwMap = [[10, 11], [8, 9], [6, 7], [4, 5], [2, 3], [0, 1]];
+        
+        // 空亡(日柱旬空): 按日柱所在旬查四柱地支
+        $kwMap = [[10,11],[8,9],[6,7],[4,5],[2,3],[0,1]];
         $kwTargets = $kwMap[floor($dgz / 10)];
         for($targetPillar = 0; $targetPillar <= 3; $targetPillar++){
             if($dz[$targetPillar] == $kwTargets[0]){
-                $this->addShenshaHit($items, '空亡', $targetPillar, $kwTargets[0], 2, 'dgz', $dgz, '日柱旬空');
+                $this->addShenshaHit($items,'空亡',$targetPillar,$kwTargets[0],2,'dgz',$dgz,'日柱旬空');
             }
             if($dz[$targetPillar] == $kwTargets[1]){
-                $this->addShenshaHit($items, '空亡', $targetPillar, $kwTargets[1], 2, 'dgz', $dgz, '日柱旬空');
+                $this->addShenshaHit($items,'空亡',$targetPillar,$kwTargets[1],2,'dgz',$dgz,'日柱旬空');
             }
         }
         if(empty($items['空亡'])){
@@ -2718,6 +2933,7 @@ class paipan{
         $items['空亡']['empty_targets'] = $kwTargets;
         $items['空亡']['day_gz'] = $dgz;
         
+        // 魁罡(日柱限定): 庚辰(16)/壬辰(28)/庚戌(46)/壬戌(58)
         if(in_array($dgz, [16, 28, 46, 58])){
             $items['魁罡'] = [
                 'name' => '魁罡',

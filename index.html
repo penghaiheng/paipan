@@ -276,12 +276,18 @@ function getShenshaDetail(fm) {
 	var tg = fm.tg; // [年干,月干,日干,时干]
 	var dz = fm.dz; // [年支,月支,日支,时支]
 	var pillarName = ['年','月','日','时'];
-	var order = ['天乙贵人','文昌贵人','羊刃','驿马','桃花(咸池)','将星','华盖','劫煞','空亡','魁罡'];
+	// 神煞显示顺序(吉神在前,凶煞在后)
+	var order = [
+		'天乙贵人','文昌贵人','福星贵人','太极贵人','天德贵人','月德贵人','天德合','月德合',
+		'禄神','金舆','羊刃','驿马','桃花(咸池)','将星','华盖','劫煞','亡神','灾煞',
+		'红鸾','天喜','孤辰','寡宿','天医','元辰','空亡','魁罡','天罗','地网'
+	];
 	var itemMap = {};
 
+	// 命中地支的辅助函数
 	function addHit(name, targetPillar, targetZhi, triggerPillar, triggerType, triggerValue, ruleLabel) {
 		if (!itemMap[name]) itemMap[name] = {name:name, hitsMap:{}};
-		var key = [targetPillar, targetZhi, triggerPillar, triggerType, triggerValue].join('-');
+		var key = [targetPillar, 'dz', targetZhi, triggerPillar, triggerType, triggerValue].join('-');
 		if (itemMap[name].hitsMap[key]) return;
 		var triggerValueName = triggerType === 'tg' ? p.ctg[triggerValue] : (triggerType === 'dz' ? p.cdz[triggerValue] : p.gz[triggerValue]);
 		itemMap[name].hitsMap[key] = {
@@ -298,38 +304,188 @@ function getShenshaDetail(fm) {
 		};
 	}
 
+	// 命中天干的辅助函数(天德贵人/月德贵人/天德合/月德合等)
+	function addHitTg(name, targetPillar, targetTg, triggerPillar, triggerType, triggerValue, ruleLabel) {
+		if (!itemMap[name]) itemMap[name] = {name:name, hitsMap:{}};
+		var key = [targetPillar, 'tg', targetTg, triggerPillar, triggerType, triggerValue].join('-');
+		if (itemMap[name].hitsMap[key]) return;
+		var triggerValueName = triggerType === 'tg' ? p.ctg[triggerValue] : (triggerType === 'dz' ? p.cdz[triggerValue] : p.gz[triggerValue]);
+		itemMap[name].hitsMap[key] = {
+			target_pillar: targetPillar,
+			target_pillar_name: pillarName[targetPillar],
+			target_tg: targetTg,
+			target_tg_name: p.ctg[targetTg],
+			trigger_pillar: triggerPillar,
+			trigger_pillar_name: pillarName[triggerPillar],
+			trigger_type: triggerType,
+			trigger_value: triggerValue,
+			trigger_value_name: triggerValueName,
+			rule: ruleLabel
+		};
+	}
+
 	var dayGan = tg[2];
 	var dayGz = p.GZ(tg[2], dz[2]);
 
-	// 日干规则: 天乙贵人 / 文昌贵人 / 羊刃
+	// ================================================================
+	// 一、日干起算
+	// ================================================================
+
+	// 天乙贵人: 甲戊庚→丑未, 乙己→子申, 丙丁→亥酉, 辛→午寅, 壬癸→卯巳
 	var tygrMap = [[1,7],[0,8],[11,9],[11,9],[1,7],[0,8],[1,7],[6,2],[3,5],[3,5]];
-	var tygrTargets = tygrMap[dayGan];
 	for (var i = 0; i < 4; i++) {
-		for (var j = 0; j < tygrTargets.length; j++) {
-			if (dz[i] === tygrTargets[j]) addHit('天乙贵人', i, tygrTargets[j], 2, 'tg', dayGan, '日干起');
+		for (var j = 0; j < tygrMap[dayGan].length; j++) {
+			if (dz[i] === tygrMap[dayGan][j]) addHit('天乙贵人', i, tygrMap[dayGan][j], 2, 'tg', dayGan, '日干起');
 		}
 	}
+
+	// 文昌贵人: 甲→巳,乙→午,丙戊→申,丁己→酉,庚→亥,辛→子,壬→寅,癸→卯
 	var wcgrTarget = [5,6,8,9,8,9,11,0,2,3][dayGan];
 	for (var i = 0; i < 4; i++) {
 		if (dz[i] === wcgrTarget) addHit('文昌贵人', i, wcgrTarget, 2, 'tg', dayGan, '日干起');
 	}
+
+	// 羊刃: 甲→卯,乙→寅,丙戊→午,丁己→巳,庚→酉,辛→申,壬→子,癸→亥
 	var yrTarget = [3,2,6,5,6,5,9,8,0,11][dayGan];
 	for (var i = 0; i < 4; i++) {
 		if (dz[i] === yrTarget) addHit('羊刃', i, yrTarget, 2, 'tg', dayGan, '日干起');
 	}
 
-	// 地支分组规则: 年/月/日/时四柱同查
+	// 禄神(建禄): 甲→寅,乙→卯,丙→巳,丁→午,戊→巳,己→午,庚→申,辛→酉,壬→亥,癸→子
+	var luTarget = [2,3,5,6,5,6,8,9,11,0][dayGan];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === luTarget) addHit('禄神', i, luTarget, 2, 'tg', dayGan, '日干起');
+	}
+
+	// 太极贵人: 甲乙→子午, 丙丁→卯酉, 戊己→子午卯酉, 庚辛→寅亥, 壬癸→辰巳丑未
+	var tjgrMap = [[0,6],[0,6],[3,9],[3,9],[0,6,3,9],[0,6,3,9],[2,11],[2,11],[4,5,1,7],[4,5,1,7]];
+	for (var i = 0; i < 4; i++) {
+		for (var j = 0; j < tjgrMap[dayGan].length; j++) {
+			if (dz[i] === tjgrMap[dayGan][j]) addHit('太极贵人', i, tjgrMap[dayGan][j], 2, 'tg', dayGan, '日干起');
+		}
+	}
+
+	// 金舆: 甲→辰,乙→巳,丙→未,丁→申,戊→未,己→申,庚→戌,辛→亥,壬→丑,癸→寅
+	var jyTarget = [4,5,7,8,7,8,10,11,1,2][dayGan];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === jyTarget) addHit('金舆', i, jyTarget, 2, 'tg', dayGan, '日干起');
+	}
+
+	// ================================================================
+	// 二、年干起算
+	// ================================================================
+	var yearGan = tg[0];
+
+	// 福星贵人: 甲→寅,乙→丑,丙→子,丁→亥,戊→午,己→巳,庚→申,辛→未,壬→戌,癸→酉
+	var fxgrTarget = [2,1,0,11,6,5,8,7,10,9][yearGan];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === fxgrTarget) addHit('福星贵人', i, fxgrTarget, 0, 'tg', yearGan, '年干起');
+	}
+
+	// ================================================================
+	// 三、月支起算
+	// ================================================================
+	var monthZhi = dz[1];
+
+	// 天德贵人(月支起): 部分月份目标为天干,部分为地支
+	// 子→巳(dz),丑→庚(tg),寅→丁(tg),卯→申(dz),辰→壬(tg),巳→辛(tg),
+	// 午→亥(dz),未→甲(tg),申→癸(tg),酉→寅(dz),戌→丙(tg),亥→乙(tg)
+	var tdgrRules = [[5,'dz'],[6,'tg'],[3,'tg'],[8,'dz'],[8,'tg'],[7,'tg'],[11,'dz'],[0,'tg'],[9,'tg'],[2,'dz'],[2,'tg'],[1,'tg']];
+	var tdgrVal = tdgrRules[monthZhi][0], tdgrType = tdgrRules[monthZhi][1];
+	if (tdgrType === 'tg') {
+		for (var i = 0; i < 4; i++) {
+			if (tg[i] === tdgrVal) addHitTg('天德贵人', i, tdgrVal, 1, 'dz', monthZhi, '月支起');
+		}
+	} else {
+		for (var i = 0; i < 4; i++) {
+			if (dz[i] === tdgrVal) addHit('天德贵人', i, tdgrVal, 1, 'dz', monthZhi, '月支起');
+		}
+	}
+
+	// 月德贵人(月支起,目标均为天干): 寅午戌→丙,申子辰→壬,巳酉丑→庚,亥卯未→甲
+	var ydgrTgMap = [8,6,2,0,8,6,2,0,8,6,2,0];
+	var ydgrTg = ydgrTgMap[monthZhi];
+	for (var i = 0; i < 4; i++) {
+		if (tg[i] === ydgrTg) addHitTg('月德贵人', i, ydgrTg, 1, 'dz', monthZhi, '月支起');
+	}
+
+	// 天德合(月支起,天德之六合): 子→申(dz),丑→乙(tg),寅→壬(tg),卯→巳(dz),辰→丁(tg),巳→丙(tg),
+	//   午→寅(dz),未→己(tg),申→戊(tg),酉→亥(dz),戌→辛(tg),亥→庚(tg)
+	var tdhrRules = [[8,'dz'],[1,'tg'],[8,'tg'],[5,'dz'],[3,'tg'],[2,'tg'],[2,'dz'],[4,'tg'],[4,'tg'],[11,'dz'],[7,'tg'],[6,'tg']];
+	var tdhrVal = tdhrRules[monthZhi][0], tdhrType = tdhrRules[monthZhi][1];
+	if (tdhrType === 'tg') {
+		for (var i = 0; i < 4; i++) {
+			if (tg[i] === tdhrVal) addHitTg('天德合', i, tdhrVal, 1, 'dz', monthZhi, '月支起');
+		}
+	} else {
+		for (var i = 0; i < 4; i++) {
+			if (dz[i] === tdhrVal) addHit('天德合', i, tdhrVal, 1, 'dz', monthZhi, '月支起');
+		}
+	}
+
+	// 月德合(月支起,月德之六合,目标均为天干): 申子辰→丁,巳酉丑→乙,寅午戌→辛,亥卯未→己
+	var ydhrTgMap = [3,1,7,4,3,1,7,4,3,1,7,4];
+	var ydhrTg = ydhrTgMap[monthZhi];
+	for (var i = 0; i < 4; i++) {
+		if (tg[i] === ydhrTg) addHitTg('月德合', i, ydhrTg, 1, 'dz', monthZhi, '月支起');
+	}
+
+	// 天医(月支起): 目标=月支前一位
+	var tyiTarget = (monthZhi - 1 + 12) % 12;
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === tyiTarget) addHit('天医', i, tyiTarget, 1, 'dz', monthZhi, '月支起');
+	}
+
+	// ================================================================
+	// 四、年支起算
+	// ================================================================
+	var yearZhi = dz[0];
+
+	// 红鸾(年支起): 子→卯, target=(3-yearZhi+12)%12
+	var hlTarget = (3 - yearZhi + 12) % 12;
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === hlTarget) addHit('红鸾', i, hlTarget, 0, 'dz', yearZhi, '年支起');
+	}
+
+	// 天喜(年支起): 子→酉, target=(9-yearZhi+12)%12
+	var txTarget = (9 - yearZhi + 12) % 12;
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === txTarget) addHit('天喜', i, txTarget, 0, 'dz', yearZhi, '年支起');
+	}
+
+	// 孤辰(年支起): 子丑亥→寅(2), 寅卯辰→巳(5), 巳午未→申(8), 申酉戌→亥(11)
+	var gcMap = [2,2,5,5,5,8,8,8,11,11,11,2];
+	var gcTarget = gcMap[yearZhi];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === gcTarget) addHit('孤辰', i, gcTarget, 0, 'dz', yearZhi, '年支起');
+	}
+
+	// 寡宿(年支起): 寅卯辰→丑(1), 巳午未→辰(4), 申酉戌→未(7), 亥子丑→戌(10)
+	var gsMap = [10,10,1,1,1,4,4,4,7,7,7,10];
+	var gsTarget = gsMap[yearZhi];
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === gsTarget) addHit('寡宿', i, gsTarget, 0, 'dz', yearZhi, '年支起');
+	}
+
+	// ================================================================
+	// 五、三合组地支规则(年/月/日/时四支均作触发来源)
+	// ================================================================
+	// 三合组分组(显式映射): 子辰申=0, 丑巳酉=1, 寅午戌=2, 卯未亥=3
+	var dzGroup = [0,1,2,3,0,1,2,3,0,1,2,3];
 	var groupRules = [
-		{name:'驿马', map:[2,11,8,5]},
-		{name:'桃花(咸池)', map:[9,6,3,0]},
-		{name:'将星', map:[0,9,6,3]},
-		{name:'华盖', map:[4,1,10,7]},
-		{name:'劫煞', map:[11,2,5,8]}
+		{name:'驿马',       map:[2,11,8,5]},   // 子辰申→寅, 丑巳酉→亥, 寅午戌→申, 卯未亥→巳
+		{name:'桃花(咸池)', map:[9,6,3,0]},    // 子辰申→酉, 丑巳酉→午, 寅午戌→卯, 卯未亥→子
+		{name:'将星',       map:[0,9,6,3]},    // 子辰申→子, 丑巳酉→酉, 寅午戌→午, 卯未亥→卯
+		{name:'华盖',       map:[4,1,10,7]},   // 子辰申→辰, 丑巳酉→丑, 寅午戌→戌, 卯未亥→未
+		{name:'劫煞',       map:[11,2,5,8]},   // 子辰申→亥, 丑巳酉→寅, 寅午戌→巳, 卯未亥→申
+		{name:'亡神',       map:[5,8,11,2]},   // 子辰申→巳, 丑巳酉→申, 寅午戌→亥, 卯未亥→寅
+		{name:'灾煞',       map:[6,3,0,9]}     // 子辰申→午, 丑巳酉→卯, 寅午戌→子, 卯未亥→酉
 	];
 	for (var r = 0; r < groupRules.length; r++) {
 		var rule = groupRules[r];
 		for (var triggerPillar = 0; triggerPillar < 4; triggerPillar++) {
-			var target = rule.map[dz[triggerPillar] % 4];
+			var group = dzGroup[dz[triggerPillar]];
+			var target = rule.map[group];
 			for (var targetPillar = 0; targetPillar < 4; targetPillar++) {
 				if (dz[targetPillar] === target) {
 					addHit(rule.name, targetPillar, target, triggerPillar, 'dz', dz[triggerPillar], pillarName[triggerPillar] + '支起');
@@ -337,6 +493,31 @@ function getShenshaDetail(fm) {
 			}
 		}
 	}
+
+	// ================================================================
+	// 六、日支起算
+	// ================================================================
+	var dayZhi = dz[2];
+
+	// 元辰(日支起): 目标=日支+7
+	var ycTarget = (dayZhi + 7) % 12;
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === ycTarget) addHit('元辰', i, ycTarget, 2, 'dz', dayZhi, '日支起');
+	}
+
+	// ================================================================
+	// 七、地支自身判断
+	// ================================================================
+	// 天罗: 四柱见戌(10)或亥(11)
+	// 地网: 四柱见辰(4)或巳(5)
+	for (var i = 0; i < 4; i++) {
+		if (dz[i] === 10 || dz[i] === 11) addHit('天罗', i, dz[i], i, 'dz', dz[i], '地支自身');
+		if (dz[i] === 4  || dz[i] === 5)  addHit('地网', i, dz[i], i, 'dz', dz[i], '地支自身');
+	}
+
+	// ================================================================
+	// 八、日柱特殊
+	// ================================================================
 
 	// 空亡(日柱旬空)
 	var kwMap = [[10,11],[8,9],[6,7],[4,5],[2,3],[0,1]];
@@ -349,7 +530,7 @@ function getShenshaDetail(fm) {
 	itemMap['空亡'].emptyTargets = kwTargets;
 	itemMap['空亡'].dayGz = dayGz;
 
-	// 魁罡(日柱限定)
+	// 魁罡(日柱限定): 庚辰/壬辰/庚戌/壬戌
 	if ([16,28,46,58].indexOf(dayGz) >= 0) {
 		itemMap['魁罡'] = {
 			name:'魁罡',
