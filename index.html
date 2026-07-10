@@ -412,7 +412,7 @@ function getShenshaDetail(fm) {
 
 	// 天德合(月支起,天德之六合): 子→申(dz),丑→乙(tg),寅→壬(tg),卯→巳(dz),辰→丁(tg),巳→丙(tg),
 	//   午→寅(dz),未→己(tg),申→戊(tg),酉→亥(dz),戌→辛(tg),亥→庚(tg)
-	var tdhrRules = [[8,'dz'],[1,'tg'],[8,'tg'],[5,'dz'],[3,'tg'],[2,'tg'],[2,'dz'],[4,'tg'],[4,'tg'],[11,'dz'],[7,'tg'],[6,'tg']];
+	var tdhrRules = [[8,'dz'],[1,'tg'],[8,'tg'],[5,'dz'],[3,'tg'],[2,'tg'],[2,'dz'],[5,'tg'],[4,'tg'],[11,'dz'],[7,'tg'],[6,'tg']];
 	var tdhrVal = tdhrRules[monthZhi][0], tdhrType = tdhrRules[monthZhi][1];
 	if (tdhrType === 'tg') {
 		for (var i = 0; i < 4; i++) {
@@ -425,7 +425,7 @@ function getShenshaDetail(fm) {
 	}
 
 	// 月德合(月支起,月德之六合,目标均为天干): 申子辰→丁,巳酉丑→乙,寅午戌→辛,亥卯未→己
-	var ydhrTgMap = [3,1,7,4,3,1,7,4,3,1,7,4];
+	var ydhrTgMap = [3,1,7,5,3,1,7,5,3,1,7,5];
 	var ydhrTg = ydhrTgMap[monthZhi];
 	for (var i = 0; i < 4; i++) {
 		if (tg[i] === ydhrTg) addHitTg('月德合', i, ydhrTg, 1, 'dz', monthZhi, '月支起');
