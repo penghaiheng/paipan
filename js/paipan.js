@@ -2808,6 +2808,7 @@ function paipan() {
 
         rt['mz'] = this.mz[xb]; //命造乾坤
         rt['xb'] = this.xb[xb]; //性别0男1女
+        rt['xb_index'] = xb; //供神煞等需区分男女的规则复用
         rt['gl'] = [yy, mm, dd]; //公历生日
         rt['nl'] = this.Solar2Lunar(yy, mm, dd); //农历生日
         rt['tg'] = tg; //八字天干数组
@@ -2823,6 +2824,17 @@ function paipan() {
         rt['sx'] = this.csx[dz[0]]; //生肖,與年地支對應
         rt['xz'] = this.cxz[xz]; //星座
         rt['cyy'] = this.cyy[yytg[2]]; //日干阴阳
+        if (typeof PaipanShensha !== 'undefined' && PaipanShensha && typeof PaipanShensha.computeFromFatemaps === 'function') {
+            var shensha = PaipanShensha.computeFromFatemaps(rt, this, {gender: xb});
+            rt['shensha'] = shensha.lines;
+            rt['shensha_detail'] = shensha.items;
+            rt['shensha_by_pillar'] = shensha.by_pillar;
+            rt['shensha_by_target_pillar'] = shensha.by_target_pillar;
+            rt['shensha_by_source_pillar'] = shensha.by_source_pillar;
+            rt['shensha_pillar_status'] = shensha.pillar_status;
+            rt['shensha_ruleset'] = shensha.ruleset;
+            rt['shensha_warnings'] = shensha.warnings;
+        }
 
         return rt;
     };
