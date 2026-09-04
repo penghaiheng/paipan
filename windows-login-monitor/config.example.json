@@ -1,0 +1,3 @@
+{
+  "webhook_url": "https://your-gotify-server/message?token=REPLACE_ME"
+}
