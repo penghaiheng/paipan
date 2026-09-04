@@ -18,7 +18,18 @@ document.write("<script src='./js/paipan.js?v="+Math.random()+"'><\/script>");
 <!-- document.write("<script src='./js/paipan.min.js?v="+Math.random()+"'><\/script>"); -->
 
 document.write("<script src='./js/paipan.gx.js?v="+Math.random()+"'><\/script>"); //天干地支刑冲合害
+document.write("<script src='./js/fortune-panel.js?v="+Math.random()+"'><\/script>");
 </script> 
+<style>
+.fortune-panel{max-width:1000px;margin-top:20px;padding:12px;border:1px solid #d9d9d9;background:#fafafa;font-family:Arial,sans-serif}
+.fortune-section{margin-top:12px;padding:10px;border:1px solid #cfd8e3;background:#fff}
+.fortune-placeholder-badge{display:inline-block;padding:2px 8px;border-radius:10px;background:#fff3cd;color:#856404;font-size:12px}
+.fortune-meta{margin-top:8px;font-size:12px;color:#666}
+.fortune-summary{margin-top:8px}
+.fortune-layers,.fortune-evidence-list,.fortune-review-list{margin:8px 0 0 0;padding-left:20px}
+.fortune-custom-form input,.fortune-review-form input,.fortune-review-form textarea,.fortune-custom-form select{margin-right:8px}
+.fortune-review-form textarea{width:100%;max-width:600px;height:60px}
+</style>
 </head>
 <body>
 
@@ -42,6 +53,34 @@ document.write("<script src='./js/paipan.gx.js?v="+Math.random()+"'><\/script>")
 
 <div>
 <textarea id='text' style="width:1000px;height:2000px;"></textarea>
+</div>
+
+<div id="fortune-panel" class="fortune-panel">
+	<h2>运势分析</h2>
+	<div class="fortune-section">
+		<h3>当天运势（Today）</h3>
+		<div id="fortune-today-card" class="fortune-today-card"></div>
+	</div>
+	<div class="fortune-section">
+		<h3>指定时刻运势（Custom Time）</h3>
+		<div class="fortune-custom-form">
+			<input id="fortune-custom-datetime" type="datetime-local" />
+			<select id="fortune-profile-select"></select>
+			<button id="fortune-custom-calc" type="button">计算</button>
+		</div>
+		<div id="fortune-custom-result"></div>
+	</div>
+	<div class="fortune-section">
+		<h3>已发生事件回看（Review）</h3>
+		<div class="fortune-review-form">
+			<input id="fortune-review-time" type="datetime-local" />
+			<input id="fortune-review-label" type="text" placeholder="事件标签（如面试）" />
+			<textarea id="fortune-review-note" placeholder="备注"></textarea>
+			<button id="fortune-review-save" type="button">保存回看</button>
+		</div>
+		<ul id="fortune-review-list" class="fortune-review-list"></ul>
+		<div id="fortune-review-result"></div>
+	</div>
 </div>
 
 <script>
