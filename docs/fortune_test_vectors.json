@@ -1,0 +1,20 @@
+[
+  {
+    "name": "basic_standard",
+    "natal": {"tg": [2, 7, 2, 9], "dz": [6, 1, 10, 5]},
+    "target": {"year": 2027, "month": 2, "day": 4, "hour": 0, "minute": 0, "second": 1},
+    "options": {}
+  },
+  {
+    "name": "lichun_boundary",
+    "natal": {"tg": [0, 2, 4, 6], "dz": [0, 2, 4, 6]},
+    "target": {"year": 2027, "month": 2, "day": 3, "hour": 23, "minute": 59, "second": 59},
+    "options": {}
+  },
+  {
+    "name": "true_solar_with_location",
+    "natal": {"tg": [2, 7, 2, 9], "dz": [6, 1, 10, 5]},
+    "target": {"year": 2027, "month": 7, "day": 15, "hour": 10, "minute": 30, "second": 0},
+    "options": {"longitude": 116.4, "latitude": 39.9}
+  }
+]
