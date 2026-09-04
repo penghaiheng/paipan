@@ -38,6 +38,28 @@ function report_case($ok, $label, $detail = '') {
     }
 }
 
+function has_mapping_definition($rule) {
+    if (in_array($rule['rule_type'] ?? '', ['month_zhi_formula_previous_branch', 'yuanchen'], true)) {
+        return true;
+    }
+    if (isset($rule['lookup']) || isset($rule['lookup_variants']) || isset($rule['offset_formula'])) {
+        return true;
+    }
+    if (isset($rule['pair']) || isset($rule['members'])) {
+        return true;
+    }
+    return isset($rule['groups']) && isset($rule['lookup']);
+}
+
+function all_in_range($values, $min, $max) {
+    foreach ((array)$values as $value) {
+        if (!is_int($value) || $value < $min || $value > $max) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function other_value($max, $forbidden) {
     $forbidden = array_flip(array_map('intval', (array)$forbidden));
     for ($i = 0; $i < $max; $i++) {
@@ -113,6 +135,62 @@ function normalize_result($ss) {
 
 function compute_ss($p, $tg, $dz, $options = []) {
     return $p->GetShensha($tg, $dz, $options + ['gender' => 0]);
+}
+
+// 规则表完整性：id 唯一 / 字段存在 / 映射覆盖与取值范围合法
+$ruleIds = array_column($config['rules'], 'id');
+report_case(count($ruleIds) === count(array_unique($ruleIds)), '规则 id 唯一');
+foreach ($config['rules'] as $rule) {
+    $label = $rule['id'] ?? '[missing-id]';
+    report_case(isset($rule['id']) && isset($rule['name']) && isset($rule['trigger_type']) && isset($rule['target_pillars']) && isset($rule['notes']), "{$label} 必填字段完整");
+    report_case(isset($rule['allowed_source_pillars']) && all_in_range($rule['allowed_source_pillars'], 0, 3), "{$label} 触发柱位范围合法");
+    report_case(all_in_range($rule['target_pillars'], 0, 3), "{$label} 命中柱位范围合法");
+    if (isset($rule['legacy_target_pillars'])) {
+        report_case(all_in_range($rule['legacy_target_pillars'], 0, 3), "{$label} 兼容命中柱位范围合法");
+    }
+    report_case(has_mapping_definition($rule), "{$label} 映射定义存在");
+    switch ($rule['rule_type']) {
+        case 'day_gan_lookup':
+            report_case(count($rule['lookup']) === 10, "{$label} day_gan lookup 覆盖10天干");
+            break;
+        case 'day_gan_lookup_variant':
+            report_case(isset($rule['lookup_variants']['common']) && count($rule['lookup_variants']['common']) === 10, "{$label} day_gan common 覆盖10天干");
+            break;
+        case 'year_gan_lookup_variant':
+            report_case(isset($rule['lookup_variants']['common_dual_target']) && count($rule['lookup_variants']['common_dual_target']) === 10, "{$label} year_gan common 覆盖10天干");
+            break;
+        case 'month_zhi_lookup_mixed':
+        case 'month_zhi_lookup':
+        case 'year_zhi_lookup':
+            report_case(count($rule['lookup']) === 12, "{$label} lookup 覆盖12地支");
+            break;
+        case 'year_zhi_formula_offset':
+            report_case(in_array($rule['offset_formula'], ['(3-yearZhi+12)%12', '(9-yearZhi+12)%12'], true), "{$label} 偏移公式合法");
+            break;
+        case 'tri_group_lookup':
+            $groupOk = isset($rule['groups']) && count($rule['groups']) === 12;
+            report_case($groupOk, "{$label} groups 覆盖12地支");
+            if ($groupOk) {
+                $lookupOk = true;
+                foreach ($rule['groups'] as $groupIndex) {
+                    if (!array_key_exists(strval($groupIndex), $rule['lookup']) && !array_key_exists($groupIndex, $rule['lookup'])) {
+                        $lookupOk = false;
+                        break;
+                    }
+                }
+                report_case($lookupOk, "{$label} groups 对应 lookup 键完整");
+            }
+            break;
+        case 'xunkong':
+            report_case(count($rule['lookup']) === 6, "{$label} 空亡 lookup 覆盖六旬");
+            break;
+        case 'day_gz_membership':
+            report_case(all_in_range($rule['members'], 0, 59), "{$label} day_gz 成员范围合法");
+            break;
+        case 'paired_branch_presence':
+            report_case(isset($rule['pair']) && count($rule['pair']) === 2 && all_in_range($rule['pair'], 0, 11), "{$label} branch pair 定义合法");
+            break;
+    }
 }
 
 foreach ($config['rules'] as $rule) {
@@ -317,6 +395,13 @@ report_case(substr_count($dup['lines'][3], '驿马') === 1, 'lines 兼容展示�
 
 // 2027-01-07 10:00 男命端到端
 $fm = $p->fatemaps(0, 2027, 1, 7, 10, 0, 0);
+if (isset($fm['tg']) && isset($fm['dz'])) {
+    $ssCompat = $p->GetShensha($fm['tg'], $fm['dz'], ['gender' => 0]);
+    report_case($fm['shensha'] === $ssCompat['lines'], 'fatemaps().shensha 与 GetShensha().lines 兼容');
+    report_case($fm['shensha_detail'] == $ssCompat['items'], 'fatemaps().shensha_detail 与 GetShensha().items 兼容');
+    report_case($fm['shensha_by_pillar'] == $ssCompat['by_pillar'], 'fatemaps().shensha_by_pillar 与 GetShensha().by_pillar 兼容');
+}
+report_case($fm['shensha_by_pillar'] == $fm['shensha_by_target_pillar'], 'shensha_by_pillar 与 shensha_by_target_pillar 兼容别名一致');
 report_case($fm['sz'] === ['丙午', '辛丑', '丙戌', '癸巳'], '2027-01-07 10:00 男命四柱回归');
 report_case(count($fm['shensha_pillar_status']) === 4 && array_reduce($fm['shensha_pillar_status'], fn($carry, $item) => $carry && $item['calculated'], true), '2027-01-07 10:00 四柱神煞均标记已计算');
 report_case(isset($fm['shensha_pillar_status'][1]) && $fm['shensha_pillar_status'][1]['source_rule_count'] > 0, '2027-01-07 10:00 月柱作为触发来源已计算');
