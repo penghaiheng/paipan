@@ -6,7 +6,7 @@
 
 ## 构建和安装
 
-在 Windows 且已安装 Go 1.22+ 的管理员终端运行：
+在 Windows 且已安装 Go 1.23+ 的管理员终端运行：
 
 ```powershell
 go build -o login-monitor.exe .

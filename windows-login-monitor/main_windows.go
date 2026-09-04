@@ -12,13 +12,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
-	"golang.org/x/sys/windows/svc/debug"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
@@ -209,7 +207,7 @@ func (p *program) queueHeartbeat() {
 }
 
 func (p *program) readLoginEvents() ([]event, uint64, error) {
-	query := "*[System[(EventID=4624 or EventID=4625) and EventRecordID > " + strconv.FormatUint(p.state.LastRecordID, 10) + "]]"
+	query := "*[System[(EventID=4624 or EventID=4625) and EventRecordID > " + strconv.FormatUint(p.state.LastRecordID, 10) + " and TimeCreated[timediff(@SystemTime) <= 660000]]]"
 	command := fmt.Sprintf(`Get-WinEvent -LogName Security -FilterXPath '%s' -ErrorAction Stop | ForEach-Object { [PSCustomObject]@{ Id=$_.Id; RecordId=$_.RecordId; Time=$_.TimeCreated.ToUniversalTime().ToString('o'); User=$_.Properties[5].Value; Address=$_.Properties[19].Value } } | ConvertTo-Json -Compress`, query)
 	out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command).Output()
 	if err != nil {
@@ -237,7 +235,11 @@ func (p *program) readLoginEvents() ([]event, uint64, error) {
 			return nil, p.state.LastRecordID, err
 		}
 		records = []struct {
-			ID int `json:"Id"`; RecordID uint64 `json:"RecordId"`; Time string `json:"Time"`; User string `json:"User"`; Address string `json:"Address"`
+			ID       int    `json:"Id"`
+			RecordID uint64 `json:"RecordId"`
+			Time     string `json:"Time"`
+			User     string `json:"User"`
+			Address  string `json:"Address"`
 		}{record}
 	} else if err := json.Unmarshal(out, &records); err != nil {
 		return nil, p.state.LastRecordID, err
@@ -291,7 +293,8 @@ func sendWebhook(url string, events []event) error {
 
 func uptime() time.Duration {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	return time.Duration(kernel32.NewProc("GetTickCount64").Call()) * time.Millisecond
+	ticks, _, _ := kernel32.NewProc("GetTickCount64").Call()
+	return time.Duration(ticks) * time.Millisecond
 }
 
 func install() error {
@@ -323,7 +326,7 @@ func uninstall() error {
 		return err
 	}
 	defer service.Close()
-	_ = service.Control(svc.Stop)
+	_, _ = service.Control(svc.Stop)
 	return service.Delete()
 }
 
@@ -353,6 +356,3 @@ func (w *rotatingWriter) Write(data []byte) (int, error) {
 	defer file.Close()
 	return file.Write(data)
 }
-
-var _ = debug.Log
-var _ = strings.TrimSpace
