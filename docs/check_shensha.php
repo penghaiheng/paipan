@@ -1,473 +1,359 @@
 <?php
 /**
- * 八字神煞验证脚本:
- * - 原有神煞: 天乙贵人/文昌贵人/羊刃/驿马/桃花/将星/华盖/劫煞/空亡/魁罡
- * - 新增神煞: 福星贵人/太极贵人/天德贵人/月德贵人/天德合/月德合/禄神/金舆/
- *             红鸾/天喜/孤辰/寡宿/亡神/灾煞/天医/元辰/天罗/地网
- * - 覆盖: 年干/年支/月支/日干/日支/日柱/三合组等不同触发来源
- * - 同一神煞多来源命中: 显示去重但明细保留依据
+ * 神煞规则校验脚本
+ * - 审计共享规则配置 lib/shensha_rules.json
+ * - 覆盖全部查表键值的命中/不命中
+ * - 校验重复命中去重但保留多触发依据、空亡六旬、魁罡、节气边界、2027-01-07 10:00 男命
+ * - 校验 PHP/JS 使用同一组测试向量时输出一致
  *
  * 用法: php docs/check_shensha.php
  */
-if(php_sapi_name() !== 'cli'){
+if (php_sapi_name() !== 'cli') {
     die("请在 CLI 下执行: php docs/check_shensha.php\n");
 }
+error_reporting(E_ALL & ~E_WARNING & ~E_NOTICE);
 
-include(__DIR__ . '/../lib/class.paipan.php');
+include __DIR__ . '/../lib/class.paipan.php';
 $p = new paipan();
-
-function has_trigger($ss, $name, $triggerPillar){
-    foreach($ss['items'] as $item){
-        if($item['name'] != $name){
-            continue;
-        }
-        foreach($item['hits'] as $hit){
-            if($hit['trigger_pillar'] == $triggerPillar){
-                return true;
-            }
-        }
-    }
-    return false;
+$config = json_decode(file_get_contents(__DIR__ . '/../lib/shensha_rules.json'), true);
+$ruleById = [];
+foreach ($config['rules'] as $rule) {
+    $ruleById[$rule['id']] = $rule;
 }
-
-function has_hit_pillar($ss, $name, $targetPillar){
-    foreach($ss['items'] as $item){
-        if($item['name'] != $name) continue;
-        foreach($item['hits'] as $hit){
-            if($hit['target_pillar'] == $targetPillar) return true;
-        }
-    }
-    return false;
-}
-
-function trigger_count($ss, $name, $triggerPillar){
-    $n = 0;
-    foreach($ss['items'] as $item){
-        if($item['name'] != $name) continue;
-        foreach($item['hits'] as $hit){
-            if($hit['trigger_pillar'] == $triggerPillar) $n++;
-        }
-    }
-    return $n;
-}
-
-function check_pillar_lines($lines){
-    $prefixes = ['年柱：', '月柱：', '日柱：', '时柱：'];
-    if(count($lines) !== 4){
-        return false;
-    }
-    foreach($prefixes as $i => $prefix){
-        if(strpos($lines[$i], $prefix) !== 0){
-            return false;
-        }
-        $body = trim(substr($lines[$i], strlen($prefix)));
-        if($body === ''){
-            return false;
-        }
-        if($body === '无'){
-            continue;
-        }
-        $names = preg_split('/\s+/', $body);
-        if(count($names) !== count(array_unique($names))){
-            return false;
-        }
-    }
-    return true;
-}
-
-// ===== 测试用例 =====
-$cases = [
-    // ---- 原有神煞 ----
-    [
-        'name' => '年柱触发但日柱不触发(驿马)',
-        'tg' => [0, 2, 1, 3],
-        'dz' => [0, 1, 7, 2], // 年支子->驿马寅; 日支未->驿马巳,无巳
-        'check' => function($ss){
-            return has_trigger($ss, '驿马', 0) && !has_trigger($ss, '驿马', 2);
-        }
-    ],
-    [
-        'name' => '日柱触发但年柱不触发(驿马)',
-        'tg' => [0, 2, 0, 3],
-        'dz' => [1, 2, 0, 6], // 日支子->驿马寅命中月柱; 年支丑->驿马亥,无亥
-        'check' => function($ss){
-            return has_trigger($ss, '驿马', 2) && !has_trigger($ss, '驿马', 0);
-        }
-    ],
-    [
-        'name' => '三合组仅年支日支触发(桃花)',
-        // dz=[9,8,0,11]: 日支子(0)→桃花酉(9)→年支酉命中年柱; 月支申/时支亥不触发
-        'tg' => [0, 2, 0, 3],
-        'dz' => [9, 8, 0, 11],
-        'check' => function($ss){
-            // 日支(2)触发桃花命中年柱(0); 月支(1)和时支(3)不触发
-            return has_trigger($ss, '桃花(咸池)', 2) && has_hit_pillar($ss, '桃花(咸池)', 0)
-                && !has_trigger($ss, '桃花(咸池)', 1) && !has_trigger($ss, '桃花(咸池)', 3);
-        }
-    ],
-    [
-        'name' => '同一神煞多基准触发不丢依据(驿马)',
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 5, 0, 2], // 年支子与日支子都应触发驿马寅(时柱寅命中)
-        'check' => function($ss){
-            return trigger_count($ss, '驿马', 0) > 0 && trigger_count($ss, '驿马', 2) > 0;
-        }
-    ],
-    [
-        'name' => '神煞文本按四柱固定顺序展示并去重',
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 5, 0, 2], // 驿马由年/日重复触发, 时柱文本仍应只出现一次驿马
-        'check' => function($ss){
-            if(!check_pillar_lines($ss['lines'])){
-                return false;
-            }
-            return substr_count($ss['lines'][3], '驿马') <= 1;
-        }
-    ],
-    [
-        'name' => '空亡(日柱甲子旬,戌亥空亡)',
-        // 甲子日(dgz=0), 旬空=戌(10)亥(11)
-        'tg' => [0, 2, 0, 3],
-        'dz' => [10, 5, 0, 11], // 年支戌,时支亥,日柱甲子
-        'check' => function($ss){
-            return has_hit_pillar($ss, '空亡', 0) && has_hit_pillar($ss, '空亡', 3);
-        }
-    ],
-    [
-        'name' => '魁罡(庚辰日)',
-        // 庚辰日柱 tg=6,dz=4 -> GZ=(10+6-4)/2*12+4=(12)/2*12+4=16
-        'tg' => [0, 2, 6, 3],
-        'dz' => [0, 2, 4, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '魁罡', 2);
-        }
-    ],
-
-    // ---- 日干起算新神煞 ----
-    [
-        'name' => '禄神(甲日干->寅,月支寅命中)',
-        // 甲日干->寅(2). 月支寅(2)命中月柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '禄神', 1) && has_trigger($ss, '禄神', 2);
-        }
-    ],
-    [
-        'name' => '太极贵人(甲日干->子午,日/时命中)',
-        // 甲日干->子(0)午(6). 日支子(0)+时支午(6). 日干起类不落年柱
-        'tg' => [0, 2, 0, 8],
-        'dz' => [0, 2, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '太极贵人', 2) && has_hit_pillar($ss, '太极贵人', 3) && !has_hit_pillar($ss, '太极贵人', 0);
-        }
-    ],
-    [
-        'name' => '金舆(甲日干->辰,日支辰命中)',
-        // 甲日干->辰(4). 日支辰(4)命中日柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 4, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '金舆', 2);
-        }
-    ],
-
-    // ---- 年干起算新神煞 ----
-    [
-        'name' => '福星贵人(甲年干->寅,月支寅命中)',
-        // 年干甲(0)->寅(2). 月支寅(2)命中月柱
-        'tg' => [0, 2, 8, 3],
-        'dz' => [0, 2, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '福星贵人', 1) && has_trigger($ss, '福星贵人', 0);
-        }
-    ],
-
-    // ---- 月支起算新神煞 ----
-    [
-        'name' => '月德贵人(月支寅->丙,月干丙命中月柱)',
-        // 月支寅(2)->月德=丙(2). 月干丙(2)命中月柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '月德贵人', 1);
-        }
-    ],
-    [
-        'name' => '天德贵人(月支寅->丁干,时干丁命中时柱)',
-        // 月支寅(2)->天德=丁(tg3). 时干丁(3)命中时柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 0, 9],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天德贵人', 3);
-        }
-    ],
-    [
-        'name' => '天德合(月支寅->壬干,年干壬命中年柱)',
-        // 月支寅(2)->天德丁->天德合=壬(tg8). 年干壬(8)命中年柱
-        'tg' => [8, 2, 0, 3],
-        'dz' => [0, 2, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天德合', 0);
-        }
-    ],
-    [
-        'name' => '月德合(月支寅->辛干,时干辛命中时柱)',
-        // 月支寅(2)->月德丙->月德合=辛(tg7). 时干辛(7)命中时柱
-        'tg' => [0, 2, 0, 7],
-        'dz' => [0, 2, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '月德合', 3);
-        }
-    ],
-    [
-        'name' => '天医(月支子->亥,年支亥命中年柱)',
-        // 月支子(0)->天医=(0-1+12)%12=11(亥). 年支亥(11)命中年柱
-        'tg' => [0, 8, 0, 3],
-        'dz' => [11, 0, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天医', 0) && has_trigger($ss, '天医', 1);
-        }
-    ],
-    [
-        'name' => '天德贵人(月支子->巳地支,年支巳命中年柱)',
-        // 月支子(0)->天德=巳(dz5). 年支巳(5)命中年柱
-        'tg' => [0, 8, 0, 3],
-        'dz' => [5, 0, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天德贵人', 0) && has_trigger($ss, '天德贵人', 1);
-        }
-    ],
-
-    // ---- 年支起算新神煞 ----
-    [
-        'name' => '红鸾(年支午->酉,日支酉命中日柱)',
-        // 年支午(6)->红鸾=(3-6+12)%12=9(酉). 日支酉(9)命中日柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [6, 2, 9, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '红鸾', 2) && has_trigger($ss, '红鸾', 0);
-        }
-    ],
-    [
-        'name' => '天喜(年支午->卯,月支卯命中月柱)',
-        // 年支午(6)->天喜=(9-6+12)%12=3(卯). 月支卯(3)命中月柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [6, 3, 9, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天喜', 1) && has_trigger($ss, '天喜', 0);
-        }
-    ],
-    [
-        'name' => '孤辰(年支子->寅,月支寅命中月柱)',
-        // 年支子(0)->孤辰=寅(2). 月支寅(2)命中月柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '孤辰', 1) && has_trigger($ss, '孤辰', 0);
-        }
-    ],
-    [
-        'name' => '寡宿(年支子->戌,年支本身为戌不命中;改用年支寅->丑)',
-        // 年支寅(2)->寡宿=丑(1). 月支丑(1)命中月柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [2, 1, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '寡宿', 1) && has_trigger($ss, '寡宿', 0);
-        }
-    ],
-
-    // ---- 三合组新神煞 ----
-    [
-        'name' => '亡神(年支子辰申->巳,时支巳命中时柱)',
-        // 年支子(0) group0->亡神=巳(5). 时支巳(5)命中时柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 0, 5],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '亡神', 3) && has_trigger($ss, '亡神', 0);
-        }
-    ],
-    [
-        'name' => '灾煞(年支子辰申->午,时支午命中时柱)',
-        // 年支子(0) group0->灾煞=午(6). 时支午(6)命中时柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '灾煞', 3) && has_trigger($ss, '灾煞', 0);
-        }
-    ],
-
-    // ---- 日支起算新神煞 ----
-    [
-        'name' => '元辰(日支子->未,时支未命中时柱)',
-        // 日支子(0)->元辰=(0+7)%12=7(未). 时支未(7)命中时柱
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 0, 7],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '元辰', 3) && has_trigger($ss, '元辰', 2);
-        }
-    ],
-
-    // ---- 地支自身神煞 ----
-    [
-        'name' => '天罗(年支亥命中年柱)',
-        'tg' => [0, 2, 0, 3],
-        'dz' => [11, 2, 0, 6], // 年支亥(11)=天罗
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天罗', 0);
-        }
-    ],
-    [
-        'name' => '天罗(时支戌命中时柱)',
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 0, 10], // 时支戌(10)=天罗
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天罗', 3);
-        }
-    ],
-    [
-        'name' => '地网(月支辰命中月柱)',
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 4, 0, 6], // 月支辰(4)=地网
-        'check' => function($ss){
-            return has_hit_pillar($ss, '地网', 1);
-        }
-    ],
-    [
-        'name' => '地网(日支巳命中日柱)',
-        'tg' => [0, 2, 0, 3],
-        'dz' => [0, 2, 5, 6], // 日支巳(5)=地网
-        'check' => function($ss){
-            return has_hit_pillar($ss, '地网', 2);
-        }
-    ],
-
-    // ---- 回归验证: 1990年农历九月二十 16:16 女命 ----
-    // 公历: 1990-11-06, 庚午年 丙戌月 乙亥日 甲申时
-    // tg=[6,2,1,0], dz=[6,10,11,8]
-    [
-        'name' => '[回归] 1990农历九月二十16:16女命-年柱含将星',
-        'tg' => [6, 2, 1, 0],
-        'dz' => [6, 10, 11, 8],
-        'check' => function($ss){ return has_hit_pillar($ss, '将星', 0); }
-    ],
-    [
-        'name' => '[回归] 1990农历九月二十16:16女命-年柱不含文昌贵人',
-        'tg' => [6, 2, 1, 0],
-        'dz' => [6, 10, 11, 8],
-        'check' => function($ss){ return !has_hit_pillar($ss, '文昌贵人', 0); }
-    ],
-    [
-        'name' => '[回归] 1990农历九月二十16:16女命-年柱不含太极贵人',
-        'tg' => [6, 2, 1, 0],
-        'dz' => [6, 10, 11, 8],
-        'check' => function($ss){ return !has_hit_pillar($ss, '太极贵人', 0); }
-    ],
-    [
-        'name' => '[回归] 1990农历九月二十16:16女命-年柱不含灾煞',
-        'tg' => [6, 2, 1, 0],
-        'dz' => [6, 10, 11, 8],
-        'check' => function($ss){ return !has_hit_pillar($ss, '灾煞', 0); }
-    ],
-    [
-        'name' => '[回归] 1990农历九月二十16:16女命-年柱不含元辰',
-        'tg' => [6, 2, 1, 0],
-        'dz' => [6, 10, 11, 8],
-        'check' => function($ss){ return !has_hit_pillar($ss, '元辰', 0); }
-    ],
-
-    // ---- 月德合 亥卯未月->己(5) bug 回归(原误映射为戊4) ----
-    [
-        'name' => '月德合(月支卯->己,年干己命中年柱)',
-        // 月支卯(3)->月德甲(0)->月德合=己(5). 年干己(5)命中年柱
-        'tg' => [5, 0, 0, 0],
-        'dz' => [0, 3, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '月德合', 0) && !has_hit_pillar($ss, '月德合', 1);
-        }
-    ],
-    [
-        'name' => '月德合(月支卯->己,年干戊不应命中)',
-        // 月支卯(3)->月德合=己(5). 年干戊(4)不应命中
-        'tg' => [4, 0, 0, 0],
-        'dz' => [0, 3, 0, 6],
-        'check' => function($ss){
-            return empty($ss['items']) || !has_hit_pillar($ss, '月德合', 0);
-        }
-    ],
-    [
-        'name' => '月德合(月支亥->己,时干己命中时柱)',
-        // 月支亥(11)->月德甲(0)->月德合=己(5). 时干己(5)命中时柱
-        'tg' => [0, 0, 0, 5],
-        'dz' => [0, 11, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '月德合', 3);
-        }
-    ],
-
-    // ---- 天德合 未月->己(5) bug 回归(原误映射为戊4) ----
-    [
-        'name' => '天德合(月支未->己,年干己命中年柱)',
-        // 月支未(7)->天德甲(0)->天德合=己(5). 年干己(5)命中年柱
-        'tg' => [5, 0, 0, 0],
-        'dz' => [0, 7, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天德合', 0);
-        }
-    ],
-    [
-        'name' => '天德合(月支未->己,年干戊不应命中)',
-        // 月支未(7)->天德合=己(5). 年干戊(4)不应命中
-        'tg' => [4, 0, 0, 0],
-        'dz' => [0, 7, 0, 6],
-        'check' => function($ss){
-            return !has_hit_pillar($ss, '天德合', 0);
-        }
-    ],
-    [
-        'name' => '天德合(月支申->戊,年干戊命中年柱)',
-        // 月支申(8)->天德癸(9)->天德合=戊(4). 年干戊(4)命中年柱(验证申月未受影响)
-        'tg' => [4, 0, 0, 0],
-        'dz' => [0, 8, 0, 6],
-        'check' => function($ss){
-            return has_hit_pillar($ss, '天德合', 0);
-        }
-    ],
-];
 
 $failed = 0;
-foreach($cases as $case){
-    $ss = $p->GetShensha($case['tg'], $case['dz']);
-    $ok = $case['check']($ss);
-    echo ($ok ? '[PASS] ' : '[FAIL] ') . $case['name'] . "\n";
-    if(!$ok){
+
+function report_case($ok, $label, $detail = '') {
+    global $failed;
+    echo ($ok ? '[PASS] ' : '[FAIL] ') . $label . "\n";
+    if (!$ok) {
         $failed++;
-        // 输出调试信息
-        echo "  八字干: " . implode(' ', array_map(fn($v) => $p->ctg[$v], $case['tg'])) . "\n";
-        echo "  八字支: " . implode(' ', array_map(fn($v) => $p->cdz[$v], $case['dz'])) . "\n";
-        echo "  神煞输出:\n";
-        foreach($ss['lines'] as $line) echo "    $line\n";
+        if ($detail !== '') {
+            foreach (explode("\n", trim($detail)) as $line) {
+                if ($line !== '') {
+                    echo '  ' . $line . "\n";
+                }
+            }
+        }
     }
 }
 
-echo "\n";
-if($failed > 0){
-    echo "共失败 {$failed} 项\n";
+function other_value($max, $forbidden) {
+    $forbidden = array_flip(array_map('intval', (array)$forbidden));
+    for ($i = 0; $i < $max; $i++) {
+        if (!isset($forbidden[$i])) {
+            return $i;
+        }
+    }
+    return 0;
+}
+
+function find_hits($ss, $ruleId, $targetPillar = null, $targetValue = null, $sourcePillar = null) {
+    $hits = [];
+    foreach ($ss['items'] as $item) {
+        foreach ($item['hits'] as $hit) {
+            if ($hit['rule_id'] !== $ruleId) {
+                continue;
+            }
+            if ($targetPillar !== null && $hit['target_pillar'] !== $targetPillar) {
+                continue;
+            }
+            if ($targetValue !== null && $hit['target_value'] !== $targetValue) {
+                continue;
+            }
+            if ($sourcePillar !== null && $hit['source_pillar'] !== $sourcePillar) {
+                continue;
+            }
+            $hits[] = $hit;
+        }
+    }
+    return $hits;
+}
+
+function normalize_result($ss) {
+    $items = [];
+    foreach ($ss['items'] as $item) {
+        $hits = [];
+        foreach ($item['hits'] as $hit) {
+            $hits[] = [
+                'rule_id' => $hit['rule_id'],
+                'source_pillar' => $hit['source_pillar'],
+                'source_type' => $hit['source_type'],
+                'source_value' => $hit['source_value'],
+                'target_pillar' => $hit['target_pillar'],
+                'target_type' => $hit['target_type'],
+                'target_value' => $hit['target_value'],
+                'pair_match' => $hit['pair_match'] ?? null,
+                'lookup_variant' => $hit['lookup_variant'] ?? null,
+                'mode' => $hit['mode'] ?? null,
+                'direction' => $hit['direction'] ?? null,
+            ];
+        }
+        usort($hits, fn($a, $b) => strcmp(json_encode($a, JSON_UNESCAPED_UNICODE), json_encode($b, JSON_UNESCAPED_UNICODE)));
+        $items[] = [
+            'name' => $item['name'],
+            'rule_ids' => $item['rule_ids'],
+            'empty_targets' => $item['empty_targets'] ?? null,
+            'day_gz' => $item['day_gz'] ?? null,
+            'hits' => $hits,
+        ];
+    }
+    return [
+        'ruleset' => $ss['ruleset'],
+        'lines' => $ss['lines'],
+        'pillar_status' => array_map(fn($item) => [
+            'pillar' => $item['pillar'],
+            'calculated' => $item['calculated'],
+            'hit_count' => $item['hit_count'],
+            'hit_names' => $item['hit_names'],
+        ], $ss['pillar_status']),
+        'items' => $items,
+    ];
+}
+
+function compute_ss($p, $tg, $dz, $options = []) {
+    return $p->GetShensha($tg, $dz, $options + ['gender' => 0]);
+}
+
+foreach ($config['rules'] as $rule) {
+    switch ($rule['rule_type']) {
+        case 'day_gan_lookup':
+            foreach ($rule['lookup'] as $stem => $targets) {
+                $tg = [other_value(10, []), other_value(10, []), intval($stem), other_value(10, [])];
+                $neutral = other_value(12, $targets);
+                $dz = [$neutral, $neutral, $neutral, $neutral];
+                foreach ($targets as $target) {
+                    $dz[0] = $target;
+                    $ss = compute_ss($p, $tg, $dz, ['gender' => 0]);
+                    report_case(count(find_hits($ss, $rule['id'], 0, $target, 2)) > 0, $rule['id'] . " 命中 dayGan={$stem} target={$target}");
+                    $dz[0] = other_value(12, $targets);
+                    $ss = compute_ss($p, $tg, $dz, ['gender' => 0]);
+                    report_case(count(find_hits($ss, $rule['id'], 0, null, 2)) === 0, $rule['id'] . " 不命中 dayGan={$stem}");
+                }
+            }
+            break;
+        case 'day_gan_lookup_variant':
+            foreach ($rule['lookup_variants']['common'] as $stem => $targets) {
+                $neutral = other_value(12, $targets);
+                $dz = [$neutral, $neutral, $neutral, $neutral];
+                $tg = [0, 1, intval($stem), 3];
+                foreach ($targets as $target) {
+                    $dz[0] = $target;
+                    $ss = compute_ss($p, $tg, $dz, ['gender' => 0, 'taiji_mode' => 'common']);
+                    report_case(count(find_hits($ss, $rule['id'], 0, $target, 2)) > 0, $rule['id'] . " common 命中 stem={$stem} target={$target}");
+                    $dz[0] = $neutral;
+                    $ss = compute_ss($p, $tg, $dz, ['gender' => 0, 'taiji_mode' => 'common']);
+                    report_case(count(find_hits($ss, $rule['id'], 0, null, 2)) === 0, $rule['id'] . " common 不命中 stem={$stem}");
+                }
+            }
+            break;
+        case 'year_gan_lookup_variant':
+            foreach ($rule['lookup_variants']['common_dual_target'] as $stem => $targets) {
+                $neutral = other_value(12, $targets);
+                $dz = [$neutral, $neutral, $neutral, $neutral];
+                $tg = [intval($stem), 1, 2, 3];
+                foreach ($targets as $target) {
+                    $dz[2] = $target;
+                    $ss = compute_ss($p, $tg, $dz, ['gender' => 0, 'fuxing_mode' => 'common_dual_target']);
+                    report_case(count(find_hits($ss, $rule['id'], 2, $target, 0)) > 0, $rule['id'] . " 命中 stem={$stem} target={$target}");
+                    $dz[2] = $neutral;
+                    $ss = compute_ss($p, $tg, $dz, ['gender' => 0, 'fuxing_mode' => 'common_dual_target']);
+                    report_case(count(find_hits($ss, $rule['id'], 2, null, 0)) === 0, $rule['id'] . " 不命中 stem={$stem}");
+                }
+            }
+            break;
+        case 'month_zhi_lookup_mixed':
+            foreach ($rule['lookup'] as $monthZhi => $target) {
+                $tg = [0, 1, 2, 3];
+                $dz = [other_value(12, [$monthZhi, $target['value']]), intval($monthZhi), other_value(12, [$target['value']]), other_value(12, [$target['value']])];
+                if ($target['type'] === 'tg') {
+                    $tg[0] = $target['value'];
+                } else {
+                    $dz[0] = $target['value'];
+                }
+                $ss = compute_ss($p, $tg, $dz, ['gender' => 0]);
+                report_case(count(find_hits($ss, $rule['id'], 0, $target['value'], 1)) > 0, $rule['id'] . " 命中 monthZhi={$monthZhi}");
+                if ($target['type'] === 'tg') {
+                    $tg[0] = other_value(10, [$target['value']]);
+                } else {
+                    $dz[0] = other_value(12, [$target['value']]);
+                }
+                $ss = compute_ss($p, $tg, $dz, ['gender' => 0]);
+                report_case(count(find_hits($ss, $rule['id'], 0, null, 1)) === 0, $rule['id'] . " 不命中 monthZhi={$monthZhi}");
+            }
+            break;
+        case 'month_zhi_lookup':
+            foreach ($rule['lookup'] as $monthZhi => $targets) {
+                foreach ($targets as $target) {
+                    $tg = [other_value(10, [$target]), 1, 2, 3];
+                    $dz = [other_value(12, [$target]), intval($monthZhi), other_value(12, [$target]), other_value(12, [$target])];
+                    if ($rule['target_value_type'] === 'tg') {
+                        $tg[3] = $target;
+                        $targetPillar = 3;
+                    } else {
+                        $dz[3] = $target;
+                        $targetPillar = 3;
+                    }
+                    $ss = compute_ss($p, $tg, $dz, ['gender' => 0]);
+                    report_case(count(find_hits($ss, $rule['id'], $targetPillar, $target, 1)) > 0, $rule['id'] . " 命中 monthZhi={$monthZhi} target={$target}");
+                    if ($rule['target_value_type'] === 'tg') {
+                        $tg[3] = other_value(10, [$target]);
+                    } else {
+                        $dz[3] = other_value(12, [$target]);
+                    }
+                    $ss = compute_ss($p, $tg, $dz, ['gender' => 0]);
+                    report_case(count(find_hits($ss, $rule['id'], $targetPillar, null, 1)) === 0, $rule['id'] . " 不命中 monthZhi={$monthZhi}");
+                }
+            }
+            break;
+        case 'month_zhi_formula_previous_branch':
+            for ($monthZhi = 0; $monthZhi < 12; $monthZhi++) {
+                $target = ($monthZhi + 11) % 12;
+                $dz = [$target, $monthZhi, other_value(12, [$target]), other_value(12, [$target])];
+                $ss = compute_ss($p, [0, 1, 2, 3], $dz, ['gender' => 0]);
+                report_case(count(find_hits($ss, $rule['id'], 0, $target, 1)) > 0, $rule['id'] . " 命中 monthZhi={$monthZhi}");
+                $dz[0] = other_value(12, [$target]);
+                $ss = compute_ss($p, [0, 1, 2, 3], $dz, ['gender' => 0]);
+                report_case(count(find_hits($ss, $rule['id'], 0, null, 1)) === 0, $rule['id'] . " 不命中 monthZhi={$monthZhi}");
+            }
+            break;
+        case 'year_zhi_formula_offset':
+            for ($yearZhi = 0; $yearZhi < 12; $yearZhi++) {
+                $target = strpos($rule['offset_formula'], '9-') === 0 ? (9 - $yearZhi + 12) % 12 : (3 - $yearZhi + 12) % 12;
+                $dz = [$yearZhi, other_value(12, [$target]), $target, other_value(12, [$target])];
+                $ss = compute_ss($p, [0, 1, 2, 3], $dz, ['gender' => 0]);
+                report_case(count(find_hits($ss, $rule['id'], 2, $target, 0)) > 0, $rule['id'] . " 命中 yearZhi={$yearZhi}");
+                $dz[2] = other_value(12, [$target]);
+                $ss = compute_ss($p, [0, 1, 2, 3], $dz, ['gender' => 0]);
+                report_case(count(find_hits($ss, $rule['id'], 2, null, 0)) === 0, $rule['id'] . " 不命中 yearZhi={$yearZhi}");
+            }
+            break;
+        case 'year_zhi_lookup':
+            foreach ($rule['lookup'] as $yearZhi => $targets) {
+                foreach ($targets as $target) {
+                    $dz = [$yearZhi, other_value(12, [$target]), other_value(12, [$target]), $target];
+                    $ss = compute_ss($p, [0, 1, 2, 3], $dz, ['gender' => 0]);
+                    report_case(count(find_hits($ss, $rule['id'], 3, $target, 0)) > 0, $rule['id'] . " 命中 yearZhi={$yearZhi} target={$target}");
+                    $dz[3] = other_value(12, [$target]);
+                    $ss = compute_ss($p, [0, 1, 2, 3], $dz, ['gender' => 0]);
+                    report_case(count(find_hits($ss, $rule['id'], 3, null, 0)) === 0, $rule['id'] . " 不命中 yearZhi={$yearZhi}");
+                }
+            }
+            break;
+        case 'tri_group_lookup':
+            for ($sourceBranch = 0; $sourceBranch < 12; $sourceBranch++) {
+                $group = $rule['groups'][$sourceBranch];
+                $target = $rule['lookup'][$group];
+                $neutral = other_value(12, [$sourceBranch, $target]);
+                $dz = [$sourceBranch, $neutral, $neutral, $target];
+                $ss = compute_ss($p, [0, 1, 2, 3], $dz, ['gender' => 0]);
+                report_case(count(find_hits($ss, $rule['id'], 3, $target, 0)) > 0, $rule['id'] . " 命中 sourceBranch={$sourceBranch}");
+                $dz[3] = $neutral;
+                $ss = compute_ss($p, [0, 1, 2, 3], $dz, ['gender' => 0]);
+                report_case(count(find_hits($ss, $rule['id'], 3, null, 0)) === 0, $rule['id'] . " 不命中 sourceBranch={$sourceBranch}");
+            }
+            break;
+    }
+}
+
+// 元辰默认口径与兼容口径
+for ($yearZhi = 0; $yearZhi < 12; $yearZhi++) {
+    $target = ($yearZhi + 5) % 12; // 阳男，丙甲等阳年干
+    $dz = [$yearZhi, $target, other_value(12, [$target]), other_value(12, [$target])];
+    $ss = $p->GetShensha([0, 1, 2, 3], $dz, ['gender' => 0]);
+    report_case(count(find_hits($ss, 'year_branch.yuanchen', 1, $target, 0)) > 0, "year_branch.yuanchen 默认命中 yearZhi={$yearZhi}");
+    $dz[1] = other_value(12, [$target]);
+    $ss = $p->GetShensha([0, 1, 2, 3], $dz, ['gender' => 0]);
+    report_case(count(find_hits($ss, 'year_branch.yuanchen', 1, null, 0)) === 0, "year_branch.yuanchen 默认不命中 yearZhi={$yearZhi}");
+}
+$legacyYuanchen = $p->GetShensha([0, 1, 0, 3], [0, 2, 0, 7], ['ruleset' => 'paipan_legacy_compat', 'gender' => 0]);
+report_case(count(find_hits($legacyYuanchen, 'year_branch.yuanchen', 3, 7, 2)) > 0, 'year_branch.yuanchen 旧版兼容(日支+7仅查时支)');
+
+// 天罗地网默认需成对，旧版兼容单支
+$pairedTianluo = $p->GetShensha([0, 1, 2, 3], [10, 1, 11, 3], ['gender' => 0]);
+report_case(count(find_hits($pairedTianluo, 'paired.tianluo')) === 2, 'paired.tianluo 默认戌亥互见才成立');
+$singleTianluo = $p->GetShensha([0, 1, 2, 3], [10, 1, 2, 3], ['gender' => 0]);
+report_case(count(find_hits($singleTianluo, 'paired.tianluo')) === 0, 'paired.tianluo 单见戌不成立');
+$legacyTianluo = $p->GetShensha([0, 1, 2, 3], [10, 1, 2, 3], ['ruleset' => 'paipan_legacy_compat', 'gender' => 0]);
+report_case(count(find_hits($legacyTianluo, 'paired.tianluo', 0, 10, 0)) === 1, 'paired.tianluo 旧版兼容单支');
+$pairedDiwang = $p->GetShensha([0, 1, 2, 3], [4, 1, 5, 3], ['gender' => 0]);
+report_case(count(find_hits($pairedDiwang, 'paired.diwang')) === 2, 'paired.diwang 默认辰巳互见才成立');
+$singleDiwang = $p->GetShensha([0, 1, 2, 3], [4, 1, 2, 3], ['gender' => 0]);
+report_case(count(find_hits($singleDiwang, 'paired.diwang')) === 0, 'paired.diwang 单见辰不成立');
+
+// 六旬空亡全覆盖
+$xunkongDays = [
+    0 => [0, 0],   // 甲子
+    10 => [0, 10], // 甲戌
+    20 => [0, 8],  // 甲申
+    30 => [0, 6],  // 甲午
+    40 => [0, 4],  // 甲辰
+    50 => [0, 2],  // 甲寅
+];
+foreach ($xunkongDays as $dayGz => [$dayTg, $dayDz]) {
+    $targets = $ruleById['day_gz.xunkong']['lookup'][intval(floor($dayGz / 10))];
+    $dz = [$targets[0], other_value(12, $targets), $dayDz, other_value(12, $targets)];
+    $tg = [0, 1, $dayTg, 3];
+    $ss = $p->GetShensha($tg, $dz, ['gender' => 0]);
+    report_case(count(find_hits($ss, 'day_gz.xunkong', 0, $targets[0], 2)) > 0, "day_gz.xunkong 命中 dayGz={$dayGz}");
+    $dz[0] = other_value(12, $targets);
+    $ss = $p->GetShensha($tg, $dz, ['gender' => 0]);
+    report_case(count(find_hits($ss, 'day_gz.xunkong', 0, null, 2)) === 0, "day_gz.xunkong 不命中 dayGz={$dayGz}");
+}
+
+// 魁罡四日与非魁罡
+foreach ([[6,4,16],[8,4,28],[6,10,46],[8,10,58]] as [$tgDay, $dzDay, $dayGz]) {
+    $ss = $p->GetShensha([0, 1, $tgDay, 3], [0, 2, $dzDay, 6], ['gender' => 0]);
+    report_case(count(find_hits($ss, 'day_gz.kuigang', 2, $dayGz, 2)) > 0, "day_gz.kuigang 命中 {$dayGz}");
+}
+$notKuigang = $p->GetShensha([0, 1, 0, 3], [0, 2, 0, 6], ['gender' => 0]);
+report_case(count(find_hits($notKuigang, 'day_gz.kuigang')) === 0, 'day_gz.kuigang 非魁罡不命中');
+
+// 重复命中去重但保留多触发依据
+$dup = $p->GetShensha([0, 2, 0, 3], [0, 5, 0, 2], ['gender' => 0]);
+$yimaHits = find_hits($dup, 'group.yima', 3, 2);
+report_case(count($yimaHits) === 2, 'group.yima 同一落点保留年支/日支双重触发依据');
+report_case(substr_count($dup['lines'][3], '驿马') === 1, 'lines 兼容展示对重复命中去重');
+
+// 2027-01-07 10:00 男命端到端
+$fm = $p->fatemaps(0, 2027, 1, 7, 10, 0, 0);
+report_case($fm['sz'] === ['丙午', '辛丑', '丙戌', '癸巳'], '2027-01-07 10:00 男命四柱回归');
+report_case(count($fm['shensha_pillar_status']) === 4 && array_reduce($fm['shensha_pillar_status'], fn($carry, $item) => $carry && $item['calculated'], true), '2027-01-07 10:00 四柱神煞均标记已计算');
+report_case(isset($fm['shensha_pillar_status'][1]) && $fm['shensha_pillar_status'][1]['source_rule_count'] > 0, '2027-01-07 10:00 月柱作为触发来源已计算');
+report_case(isset($fm['shensha_pillar_status'][1]) && is_array($fm['shensha_pillar_status'][1]['hit_names']), '2027-01-07 10:00 月柱状态结构存在');
+report_case($fm['shensha_ruleset'] === 'paipan_v2_default', '2027-01-07 10:00 使用默认审计规则集');
+
+// 节气月边界前后仍能完成神煞计算
+$times = [
+    'before' => [2027, 2, 3, 23, 59, 59],
+    'after' => [2027, 2, 4, 0, 0, 1],
+];
+foreach ($times as $label => $parts) {
+    $fmEdge = $p->fatemaps(0, $parts[0], $parts[1], $parts[2], $parts[3], $parts[4], $parts[5]);
+    report_case(count($fmEdge['shensha_pillar_status']) === 4, "节气边界 {$label} 神煞状态完整");
+    report_case(isset($fmEdge['shensha_by_source_pillar'][1]), "节气边界 {$label} 月柱来源结构存在");
+}
+
+// PHP / JS 共享测试向量一致
+$vectorFile = __DIR__ . '/shensha_test_vectors.json';
+$vectors = json_decode(file_get_contents($vectorFile), true);
+$phpParity = [];
+foreach ($vectors as $vector) {
+    $phpParity[$vector['name']] = normalize_result($p->GetShensha($vector['tg'], $vector['dz'], ['gender' => $vector['gender']]));
+}
+$jsOutput = shell_exec('node ' . escapeshellarg(__DIR__ . '/check_shensha_js.js'));
+$jsParity = json_decode($jsOutput, true);
+$jsMap = [];
+foreach ((array)$jsParity as $entry) {
+    $jsMap[$entry['name']] = $entry['result'];
+}
+foreach ($phpParity as $name => $normalized) {
+    report_case(isset($jsMap[$name]) && $jsMap[$name] == $normalized, 'PHP/JS 一致性 ' . $name, isset($jsMap[$name]) ? '' : 'JS 输出缺少该向量');
+}
+
+if ($failed > 0) {
+    echo "\n共失败 {$failed} 项\n";
     exit(1);
 }
-echo "全部验证通过\n";
 
-// ===== 完整八字样例输出 =====
-echo "\n====== 完整八字样例输出 ======\n";
-$samples = [
-    ['label'=>'甲子年 丙寅月 甲子日 壬午时', 'tg'=>[0,2,0,8], 'dz'=>[0,2,0,6]],
-    ['label'=>'辛亥年 壬子月 庚辰日 己卯时', 'tg'=>[7,8,6,4], 'dz'=>[11,0,4,3]],
-    ['label'=>'甲午年 丁卯月 甲寅日 丁酉时', 'tg'=>[0,3,0,3], 'dz'=>[6,3,2,9]],
-    ['label'=>'癸巳年 甲午月 壬辰日 辛亥时', 'tg'=>[9,0,8,7], 'dz'=>[5,6,4,11]],
-    ['label'=>'[回归] 庚午年 丙戌月 乙亥日 甲申时 (1990农历九月二十16:16女命)', 'tg'=>[6,2,1,0], 'dz'=>[6,10,11,8]],
-];
-foreach($samples as $s){
-    $ss = $p->GetShensha($s['tg'], $s['dz']);
-    echo "\n{$s['label']}:\n";
-    foreach($ss['lines'] as $line) echo "  $line\n";
-}
+echo "\n全部验证通过\n";
