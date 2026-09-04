@@ -3476,6 +3476,356 @@ class paipan{
 
         return $rt;
     }
+    /**
+     * 非负取模
+     * @param int $value
+     * @param int $mod
+     * @return int
+     */
+    private function posMod($value, $mod){
+        $value = intval($value);
+        $mod = intval($mod);
+        if($mod <= 0){
+            return 0;
+        }
+        return (($value % $mod) + $mod) % $mod;
+    }
+    /**
+     * 标准化 datetime 数组
+     * @param array $parts
+     * @return array
+     */
+    private function normalizeDatetimeParts($parts){
+        return [
+            'year' => intval($parts[0]),
+            'month' => intval($parts[1]),
+            'day' => intval($parts[2]),
+            'hour' => intval($parts[3]),
+            'minute' => intval($parts[4]),
+            'second' => intval($parts[5]),
+        ];
+    }
+    /**
+     * 根据干支代码构造柱信息
+     * @param int $tg
+     * @param int $dz
+     * @return array
+     */
+    private function buildPillar($tg, $dz){
+        $tg = intval($tg);
+        $dz = intval($dz);
+        $gz = $this->GZ($tg, $dz);
+        return [
+            'tg' => $tg,
+            'dz' => $dz,
+            'gz' => $gz,
+            'text' => $this->ctg[$tg] . $this->cdz[$dz],
+            'tg_text' => $this->ctg[$tg],
+            'dz_text' => $this->cdz[$dz],
+        ];
+    }
+    /**
+     * 解析目标时刻（支持真太阳时）
+     * @return false|array
+     */
+    private function resolveFortuneTargetTime($yy, $mm, $dd, $hh = 0, $mt = 0, $ss = 0, $J = null, $W = null){
+        $yy = intval($yy);
+        $mm = intval($mm);
+        $dd = intval($dd);
+        $hh = intval($hh);
+        $mt = intval($mt);
+        $ss = intval($ss);
+        if($this->ValidDate($yy, $mm, $dd) === false){
+            return false;
+        }
+        $spcjd = $this->Jdays($yy, $mm, $dd, $hh, $mt, $ss);
+        if($spcjd === false){
+            return false;
+        }
+        $rt = [
+            'input_datetime' => ['year' => $yy, 'month' => $mm, 'day' => $dd, 'hour' => $hh, 'minute' => $mt, 'second' => $ss],
+            'time_basis' => 'standard',
+            'longitude' => $J,
+            'latitude' => $W,
+            'spcjd' => $spcjd,
+            'effective_jd' => $spcjd,
+            'effective_datetime' => $this->normalizeDatetimeParts($this->Jtime($spcjd)),
+        ];
+        if(is_null($J) === false){
+            $J = floatval($J);
+            $W = is_null($W) ? $this->W : floatval($W);
+            $ptyJd = $spcjd - ($this->J - $J) * 4 / 60 / 24;
+            $effectiveJd = $this->zty($spcjd, $J, $W);
+            $rt['time_basis'] = 'true_solar';
+            $rt['longitude'] = $J;
+            $rt['latitude'] = $W;
+            $rt['standard_datetime'] = $this->normalizeDatetimeParts($this->Jtime($spcjd));
+            $rt['pty'] = $this->normalizeDatetimeParts($this->Jtime($ptyJd));
+            $rt['zty'] = $this->normalizeDatetimeParts($this->Jtime($effectiveJd));
+            $rt['effective_jd'] = $effectiveJd;
+            $rt['effective_datetime'] = $rt['zty'];
+        }
+        return $rt;
+    }
+    /**
+     * 定位当前节气月（按十二节）
+     * @param float $spcjd
+     * @param array $jr
+     * @return array
+     */
+    private function locateJieMonth($spcjd, $jr){
+        $tm = 0;
+        for($j = 0; ; $j++){
+            if($spcjd < $jr[21 + 2 * $j]){
+                $tm = $j - 1;
+                break;
+            }
+        }
+        return [
+            'tm' => $tm,
+            'month_index' => $this->posMod($tm, 12), // 0=寅
+            'start_jd' => $jr[21 + 2 * $tm],
+            'next_jd' => $jr[21 + 2 * $tm + 2],
+            'start_jie_index' => $this->posMod(21 + 2 * $tm, 24),
+            'next_jie_index' => $this->posMod(21 + 2 * $tm + 2, 24),
+        ];
+    }
+    /**
+     * 五虎遁计算流月干（寅月起算）
+     * @param int $yearTg
+     * @param int $monthIndex 0=寅,1=卯...
+     * @return int
+     */
+    private function getWuhuMonthStem($yearTg, $monthIndex){
+        $yearTg = intval($yearTg);
+        $monthIndex = intval($monthIndex);
+        if(in_array($yearTg, [0, 5], true)){ // 甲己
+            $start = 2; // 丙寅
+        }elseif(in_array($yearTg, [1, 6], true)){ // 乙庚
+            $start = 4; // 戊寅
+        }elseif(in_array($yearTg, [2, 7], true)){ // 丙辛
+            $start = 6; // 庚寅
+        }elseif(in_array($yearTg, [3, 8], true)){ // 丁壬
+            $start = 8; // 壬寅
+        }else{ // 戊癸
+            $start = 0; // 甲寅
+        }
+        return $this->posMod($start + $monthIndex, 10);
+    }
+    /**
+     * 获取目标时刻流年/流月/流日确定性柱信息
+     */
+    public function GetFortunePillars($yy, $mm, $dd, $hh = 0, $mt = 0, $ss = 0, $J = null, $W = null){
+        $time = $this->resolveFortuneTargetTime($yy, $mm, $dd, $hh, $mt, $ss, $J, $W);
+        if($time === false){
+            return false;
+        }
+        $ed = $time['effective_datetime'];
+        $gz = $this->GetGZ($ed['year'], $ed['month'], $ed['day'], $ed['hour'], $ed['minute'], $ed['second']);
+        if($gz === false){
+            return false;
+        }
+        [$tg, $dz, $ob] = $gz;
+        $spcjd = $this->Jdays($ed['year'], $ed['month'], $ed['day'], $ed['hour'], $ed['minute'], $ed['second']);
+        $jieMonth = $this->locateJieMonth($spcjd, $ob['jr']);
+        $monthTgByWuhu = $this->getWuhuMonthStem($tg[0], $jieMonth['month_index']);
+        $monthDzByJie = $this->posMod(2 + $jieMonth['month_index'], 12);
+        $yearStartJd = $this->GetAdjustedJQ($ob['ty'] - 1, false)[21];
+        $yearNextJd = $this->GetAdjustedJQ($ob['ty'], false)[21];
+        return [
+            'input' => [
+                'datetime' => $time['input_datetime'],
+                'longitude' => $time['longitude'],
+                'latitude' => $time['latitude'],
+            ],
+            'time_basis' => $time['time_basis'],
+            'effective_datetime' => $ed,
+            'effective_aux' => [
+                'standard_datetime' => $time['standard_datetime'] ?? $ed,
+                'pty' => $time['pty'] ?? null,
+                'zty' => $time['zty'] ?? null,
+            ],
+            'profile' => [
+                'year_boundary' => 'lichun',
+                'month_boundary' => 'jieqi',
+                'day_boundary' => $this->zwz ? 'existing_zwz_setting' : 'zi_00',
+            ],
+            'natal' => null,
+            'target' => [
+                'tg' => $tg,
+                'dz' => $dz,
+                'gz' => [
+                    $this->GZ($tg[0], $dz[0]),
+                    $this->GZ($tg[1], $dz[1]),
+                    $this->GZ($tg[2], $dz[2]),
+                    $this->GZ($tg[3], $dz[3]),
+                ],
+            ],
+            'year_panel' => [
+                'pillar' => $this->buildPillar($tg[0], $dz[0]),
+                'boundary' => [
+                    'type' => 'lichun',
+                    'effective_year' => intval($ob['ty']),
+                    'start' => ['name' => '立春', 'datetime' => $this->normalizeDatetimeParts($this->Jtime($yearStartJd))],
+                    'next' => ['name' => '立春', 'datetime' => $this->normalizeDatetimeParts($this->Jtime($yearNextJd))],
+                ],
+                'evidences' => [
+                    ['id' => 'year.pillar', 'layer' => 'year', 'rule_id' => 'calendar.lichun.year_pillar', 'title' => '流年以立春换年', 'detail' => '年柱由立春边界确定', 'polarity' => 'neutral', 'participants' => [['scope' => 'transit', 'layer' => 'year', 'pillar' => 'year']]],
+                ],
+            ],
+            'month_panel' => [
+                'pillar' => $this->buildPillar($tg[1], $dz[1]),
+                'boundary' => [
+                    'type' => 'jieqi',
+                    'month_index' => $jieMonth['month_index'],
+                    'current_jie' => $this->jq[$jieMonth['start_jie_index']],
+                    'next_jie' => $this->jq[$jieMonth['next_jie_index']],
+                    'start' => ['name' => $this->jq[$jieMonth['start_jie_index']], 'datetime' => $this->normalizeDatetimeParts($this->Jtime($jieMonth['start_jd']))],
+                    'next' => ['name' => $this->jq[$jieMonth['next_jie_index']], 'datetime' => $this->normalizeDatetimeParts($this->Jtime($jieMonth['next_jd']))],
+                ],
+                'wuhu_dun' => [
+                    'year_tg' => intval($tg[0]),
+                    'month_index_from_yin' => $jieMonth['month_index'],
+                    'expected_month_tg' => $monthTgByWuhu,
+                    'expected_month_dz' => $monthDzByJie,
+                    'matches_getgz' => ($monthTgByWuhu === intval($tg[1]) && $monthDzByJie === intval($dz[1])),
+                ],
+                'evidences' => [
+                    ['id' => 'month.pillar', 'layer' => 'month', 'rule_id' => 'calendar.jieqi.month_pillar', 'title' => '流月以十二节换月', 'detail' => '当前流月由节气月边界确定', 'polarity' => 'neutral', 'participants' => [['scope' => 'transit', 'layer' => 'month', 'pillar' => 'month']]],
+                    ['id' => 'month.wuhu', 'layer' => 'month', 'rule_id' => 'calendar.wuhu_dun.month_stem', 'title' => '流月干按五虎遁顺推', 'detail' => '从流年干确定寅月干后顺推当月', 'polarity' => 'neutral', 'participants' => [['scope' => 'transit', 'layer' => 'month', 'pillar' => 'month']]],
+                ],
+            ],
+            'day_panel' => [
+                'pillar' => $this->buildPillar($tg[2], $dz[2]),
+                'boundary' => [
+                    'type' => 'existing_zwz_setting',
+                    'zwz' => $this->zwz ? true : false,
+                    'description' => $this->zwz ? '区分早晚子时(23:00-23:59按上一日柱)' : '不区分早晚子时(00:00换日)',
+                ],
+                'evidences' => [
+                    ['id' => 'day.pillar', 'layer' => 'day', 'rule_id' => 'calendar.getgz.day_pillar', 'title' => '流日复用 GetGZ 日柱', 'detail' => '日柱按现有 GetGZ 与 zwz 开关计算', 'polarity' => 'neutral', 'participants' => [['scope' => 'transit', 'layer' => 'day', 'pillar' => 'day']]],
+                ],
+            ],
+        ];
+    }
+    /**
+     * 组合本命和流转时刻进行客观分析
+     */
+    public function AnalyzeFortuneAt($natalTg, $natalDz, $targetY, $targetM, $targetD, $targetH = 0, $targetMin = 0, $targetSec = 0, $options = []){
+        if(!is_array($natalTg) || !is_array($natalDz) || count($natalTg) !== 4 || count($natalDz) !== 4){
+            return ['error' => 'invalid_natal_pillars', 'message' => '本命四柱必须为长度为4的天干/地支数组'];
+        }
+        $natalTg = array_values(array_map('intval', $natalTg));
+        $natalDz = array_values(array_map('intval', $natalDz));
+        for($i = 0; $i < 4; $i++){
+            if($natalTg[$i] < 0 || $natalTg[$i] > 9 || $natalDz[$i] < 0 || $natalDz[$i] > 11){
+                return ['error' => 'invalid_natal_value', 'message' => '本命四柱天干或地支超出范围'];
+            }
+        }
+        $J = $options['longitude'] ?? ($options['J'] ?? null);
+        $W = $options['latitude'] ?? ($options['W'] ?? null);
+        $target = $this->GetFortunePillars($targetY, $targetM, $targetD, $targetH, $targetMin, $targetSec, $J, $W);
+        if($target === false){
+            return ['error' => 'invalid_target_datetime', 'message' => '目标时刻无效'];
+        }
+        $relations = $this->GetGX(array_merge($natalTg, [$target['year_panel']['pillar']['tg'], $target['month_panel']['pillar']['tg'], $target['day_panel']['pillar']['tg']]), array_merge($natalDz, [$target['year_panel']['pillar']['dz'], $target['month_panel']['pillar']['dz'], $target['day_panel']['pillar']['dz']]));
+        $natalShensha = $this->GetShensha($natalTg, $natalDz, ['gender' => $options['gender'] ?? null]);
+        $buildPanel = function($layerKey, $targetIndex) use ($target, $relations){
+            $panel = $target[$layerKey];
+            $panel['relations'] = [];
+            $panel['shensha'] = [
+                'supported' => false,
+                'source_scope' => 'natal',
+                'target_scope' => 'transit',
+                'items' => [],
+                'reason' => '当前规则引擎仅对单组四柱做本命神煞计算，未内置“本命触发、流转目标”跨组判定。',
+            ];
+            $panel['evidences'][] = [
+                'id' => $layerKey . '.shensha.unsupported',
+                'layer' => str_replace('_panel', '', $layerKey),
+                'rule_id' => 'shensha.transit.unsupported',
+                'title' => '流转神煞检查未启用',
+                'detail' => '仅输出本命神煞，流年/流月/流日目标检查暂未启用',
+                'polarity' => 'neutral',
+                'participants' => [['scope' => 'natal', 'layer' => 'natal'], ['scope' => 'transit', 'layer' => str_replace('_panel', '', $layerKey)]],
+            ];
+            foreach($relations as $componentType => $items){
+                foreach($items as $idx => $item){
+                    $positions = array_keys($item[0]);
+                    if(in_array($targetIndex, $positions, true) === false){
+                        continue;
+                    }
+                    $natalPositions = [];
+                    foreach($positions as $pidx){
+                        if($pidx >= 0 && $pidx <= 3){
+                            $natalPositions[] = $pidx;
+                        }
+                    }
+                    if(empty($natalPositions)){
+                        continue;
+                    }
+                    $ruleId = 'gx.' . ($componentType === 0 ? 'tg' : 'dz') . '.' . $item[1][1] . '.' . md5($item[1][4] . implode(',', $positions));
+                    $panel['relations'][] = [
+                        'rule_id' => $ruleId,
+                        'title' => $item[1][4],
+                        'component' => $componentType === 0 ? 'tg' : 'dz',
+                        'natal_pillars' => $natalPositions,
+                        'target_pillar' => str_replace('_panel', '', $layerKey),
+                    ];
+                    $panel['evidences'][] = [
+                        'id' => $layerKey . '.relation.' . $idx . '.' . ($componentType === 0 ? 'tg' : 'dz'),
+                        'layer' => str_replace('_panel', '', $layerKey),
+                        'rule_id' => $ruleId,
+                        'title' => $item[1][4],
+                        'detail' => '命中本命与' . str_replace('_panel', '', $layerKey) . '柱的干支关系',
+                        'polarity' => 'neutral',
+                        'participants' => array_merge(
+                            [['scope' => 'transit', 'layer' => str_replace('_panel', '', $layerKey), 'pillar' => str_replace('_panel', '', $layerKey)]],
+                            array_map(function($pos){
+                                return ['scope' => 'natal', 'layer' => 'natal', 'pillar' => $pos];
+                            }, $natalPositions)
+                        ),
+                    ];
+                }
+            }
+            return $panel;
+        };
+        return [
+            'input' => $target['input'],
+            'time_basis' => $target['time_basis'],
+            'effective_datetime' => $target['effective_datetime'],
+            'profile' => $target['profile'],
+            'natal' => [
+                'tg' => $natalTg,
+                'dz' => $natalDz,
+                'gz' => [
+                    $this->GZ($natalTg[0], $natalDz[0]),
+                    $this->GZ($natalTg[1], $natalDz[1]),
+                    $this->GZ($natalTg[2], $natalDz[2]),
+                    $this->GZ($natalTg[3], $natalDz[3]),
+                ],
+                'pillar_text' => [
+                    $this->ctg[$natalTg[0]] . $this->cdz[$natalDz[0]],
+                    $this->ctg[$natalTg[1]] . $this->cdz[$natalDz[1]],
+                    $this->ctg[$natalTg[2]] . $this->cdz[$natalDz[2]],
+                    $this->ctg[$natalTg[3]] . $this->cdz[$natalDz[3]],
+                ],
+            ],
+            'natal_shensha' => [
+                'ruleset' => $natalShensha['ruleset'],
+                'lines' => $natalShensha['lines'],
+                'items' => $natalShensha['items'],
+            ],
+            'year_panel' => $buildPanel('year_panel', 4),
+            'month_panel' => $buildPanel('month_panel', 5),
+            'day_panel' => $buildPanel('day_panel', 6),
+            'meta' => [
+                'calculated_at' => date('c'),
+                'algorithm_version' => 'fortune_panels_v1',
+                'day_boundary_setting' => $this->zwz ? 'early_late_zi' : 'zi_00',
+            ],
+        ];
+    }
 	/**
      * Finding All Element Combinations of an Array https://docstore.mik.ua/orelly/webprog/pcook/ch04_25.htm
      * @param array $array
